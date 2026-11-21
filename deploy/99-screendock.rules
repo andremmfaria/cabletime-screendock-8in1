@@ -1,0 +1,5 @@
+# deploy/99-screendock.rules
+# Install to /etc/udev/rules.d/99-screendock.rules (or ship via a distro package's udev.rules.d hook).
+# Grants the 'screendock' group read/write access to this device's HID interfaces only
+# (not MI_02/MI_04, which are stock Audio/Mass-Storage class devices and need no special rule).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1de1", ATTRS{idProduct}=="f201", MODE="0660", GROUP="screendock", TAG+="uaccess"

@@ -1,0 +1,15 @@
+# deploy/screendockd.service
+# Install to ~/.config/systemd/user/screendockd.service (per-user service — no root needed to run,
+# matching the udev rule's group-based access model) or package this path via a distro's systemd
+# user-unit install hook. Enable with: systemctl --user enable --now screendockd.service
+[Unit]
+Description=CABLETIME ScreenDock (CB09W) userspace display driver
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/screendockd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

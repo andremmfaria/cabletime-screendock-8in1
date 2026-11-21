@@ -1,0 +1,25 @@
+[package]
+name = "screendockd"
+version = "0.1.0"
+edition = "2021"
+description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
+license = "MIT"
+
+# Exposing both a lib and a bin target lets `tests/` (integration tests) exercise the crate's
+# modules directly, while `src/main.rs` stays a thin binary entry point.
+[lib]
+name = "screendockd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "screendockd"
+path = "src/main.rs"
+
+[dependencies]
+# Milestone 1 (device discovery + HID wire framing) needs only the standard library.
+# Later milestones add, per docs/implementation-plan.md's "Concrete Technology Choices":
+#   - serde / serde_json          (Milestone 3: heartbeat.rs JSON-RPC message construction)
+#   - ffmpeg-next / ffmpeg_sys_next (Milestone 5: encode.rs, libx264 via libavcodec)
+#   - x11 / xcb-family crate       (Milestone 4: capture/x11_shm.rs)
+#   - ashpd, pipewire              (Milestone 4: capture/wayland_portal.rs)
+#   - nix                         (Milestone 2: hidraw_io.rs, if plain std::fs write(2) proves insufficient)

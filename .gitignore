@@ -1,7 +1,9 @@
 # Build artifacts (Rust / C++ implementation, once added)
 /target/
+**/target/
 /build/
 Cargo.lock
+**/Cargo.lock
 *.o
 *.obj
 *.exe
@@ -12,23 +14,7 @@ Cargo.lock
 # Research artifacts: large and/or proprietary vendor binaries, not source.
 # Kept on disk for reference; never committed (size + redistribution concerns
 # for the vendor's own compiled driver binaries).
-/re/win_real/*.exe
-/re/win_real/*.dll
-/re/win_real/*_ghidra/
-/re/mac/*.app/
-/re/mac/*.zip
-/re/*.exe
-/re/win_extract/
-/re/ghidra_project/
-/re/winvm/*.iso
-/re/winvm/iso-src/
-
-# USB captures: large pcaps, not source. Findings are already written into
-# docs/research/*.md; the pcaps themselves stay local-only.
-/re/captures/*.pcap
-
-# Nested reference clone (has its own .git) - not part of this repo's history.
-/re/n7le-driver/
+/re
 
 # Editor / OS noise
 .DS_Store
