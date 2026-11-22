@@ -295,12 +295,18 @@ mod tests {
         fs::write(dock_usb_dev.join("idVendor"), "1de1\n").unwrap();
         fs::write(dock_usb_dev.join("idProduct"), "f201\n").unwrap();
 
-        for (iface_num, hid_suffix, hidraw_name) in
-            [(0u8, "0001", "hidraw0"), (1u8, "0002", "hidraw1"), (2u8, "0003", "hidraw2")]
-        {
+        for (iface_num, hid_suffix, hidraw_name) in [
+            (0u8, "0001", "hidraw0"),
+            (1u8, "0002", "hidraw1"),
+            (2u8, "0003", "hidraw2"),
+        ] {
             let iface_dir = dock_usb_dev.join(format!("1-2:1.{iface_num}"));
             fs::create_dir_all(&iface_dir).unwrap();
-            fs::write(iface_dir.join("bInterfaceNumber"), format!("{iface_num:02}\n")).unwrap();
+            fs::write(
+                iface_dir.join("bInterfaceNumber"),
+                format!("{iface_num:02}\n"),
+            )
+            .unwrap();
             let hid_device_dir = iface_dir.join(format!("0003:1DE1:F201.{hid_suffix}"));
             fs::create_dir_all(&hid_device_dir).unwrap();
 
