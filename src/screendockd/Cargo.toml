@@ -23,3 +23,33 @@ path = "src/main.rs"
 #   - x11 / xcb-family crate       (Milestone 4: capture/x11_shm.rs)
 #   - ashpd, pipewire              (Milestone 4: capture/wayland_portal.rs)
 #   - nix                         (Milestone 2: hidraw_io.rs, if plain std::fs write(2) proves insufficient)
+
+# Packaging metadata for `cargo-deb` (CI builds this via `cargo deb`, see
+# .github/workflows/package.yml). The daemon is installed as a per-user systemd unit
+# (see deploy/screendockd.service), so the systemd unit ships to the system-wide
+# user-unit directory (/usr/lib/systemd/user/) rather than /lib/systemd/system/ —
+# cargo-deb has no built-in "user unit" mode, so the unit is shipped as a plain asset
+# instead of using its `systemd-units` auto-integration (which assumes system units).
+[package.metadata.deb]
+maintainer = "Andre Faria <amarcalfaria@waratek.com>"
+copyright = "2026, Andre Faria <amarcalfaria@waratek.com>"
+license-file = ["../../LICENSE", "0"]
+# "Linux userspace driver for a specific HID display device" has no closer match than
+# x11/utils in Debian's section list; kept to the standard set rather than invented.
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/screendockd", "usr/bin/screendockd", "755"],
+    ["../../deploy/99-screendock.rules", "lib/udev/rules.d/99-screendock.rules", "644"],
+    ["../../deploy/screendockd.service", "usr/lib/systemd/user/screendockd.service", "644"],
+]
+
+# Packaging metadata for `cargo-generate-rpm` (CI builds this via `cargo generate-rpm`).
+# Paths/rationale mirror the [package.metadata.deb] section above.
+[package.metadata.generate-rpm]
+license = "MIT"
+assets = [
+    { source = "target/release/screendockd", dest = "/usr/bin/screendockd", mode = "755" },
+    { source = "../../deploy/99-screendock.rules", dest = "/usr/lib/udev/rules.d/99-screendock.rules", mode = "644" },
+    { source = "../../deploy/screendockd.service", dest = "/usr/lib/systemd/user/screendockd.service", mode = "644" },
+]

@@ -1,0 +1,53 @@
+name: CI
+
+# Runs on every push/PR touching main so breakage is caught before it lands, and on PRs
+# targeting main from any branch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The crate lives at src/screendockd/, not the repo root (see docs/implementation-plan.md
+        # "Project Structure") — every cargo invocation below runs from there.
+        working-directory: src/screendockd
+    steps:
+      - uses: actions/checkout@v4
+
+      # dtolnay/rust-toolchain is the more actively maintained of the two common
+      # toolchain-install actions (actions-rs/toolchain is unmaintained as of this writing).
+      # `components` pulls in rustfmt + clippy so the checks below don't need a separate install step.
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Caches ~/.cargo and target/ keyed on the lockfile/manifest, scoped to this crate's path
+      # so it doesn't collide with the packaging workflow's own cache.
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/screendockd
+
+      - name: Check formatting (cargo fmt)
+        run: cargo fmt --check
+
+      # NOTE: as of Milestone 1, `cargo clippy -- -D warnings` passes clean on this crate
+      # (verified locally: `cargo clippy -- -D warnings` produced zero warnings against commit
+      # 50c0e8a). Kept warnings-as-errors rather than relaxed, since there is nothing here to
+      # relax for; if a future milestone introduces a clippy warning in existing code that this
+      # workflow then blocks on, that's a signal to fix the warning, not to silently loosen this
+      # check without discussion.
+      - name: Lint (cargo clippy)
+        run: cargo clippy -- -D warnings
+
+      - name: Build (cargo build)
+        run: cargo build --verbose
+
+      - name: Test (cargo test)
+        run: cargo test --verbose

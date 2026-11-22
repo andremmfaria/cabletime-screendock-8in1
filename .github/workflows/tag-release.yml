@@ -1,0 +1,56 @@
+name: Tag Release
+
+# Fires on every push to main. The job below reads the crate's SemVer version out of
+# Cargo.toml and makes sure a `v<version>` tag exists pointing at the new tip — moving it
+# forward if the version string hasn't changed since the tag was last set, or creating a
+# brand-new tag if the version itself changed. Pushing the moved tag is what triggers
+# package.yml (it listens for `v*` tag pushes).
+on:
+  push:
+    branches: [main]
+
+# contents: write is required to create/move a tag and push it back to the repo using the
+# workflow's own GITHUB_TOKEN — no extra secret is configured or needed.
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: true (the default) keeps actions/checkout's token-authenticated
+      # git config in place, so the `git push` step below can push using GITHUB_TOKEN with no
+      # extra auth setup.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Read crate version from Cargo.toml
+        id: version
+        run: |
+          # `cargo metadata` parses Cargo.toml properly (handles whitespace/quoting/ordering
+          # variation) rather than assuming the version sits on a fixed line number.
+          VERSION=$(cargo metadata --no-deps --format-version=1 \
+            --manifest-path src/screendockd/Cargo.toml | jq -r '.packages[0].version')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Create or move the version tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Tag-moving logic: a tag is a movable pointer, so "create or move" is really just
+          # "force-create locally, then force-push just that ref". If Cargo.toml's version is
+          # unchanged since the last push to main, this re-points the existing v<version> tag at
+          # the new commit (e.g. a docs-only or CI-only commit after a release). If the version
+          # changed, this is effectively a brand-new tag name — the old tag, if any, is untouched.
+          git tag -f "$TAG" "$GITHUB_SHA"
+
+          # Force-push only this one tag ref, not --tags (which would force-push every tag in the
+          # repo and risk clobbering unrelated tags this workflow doesn't own).
+          git push origin "refs/tags/$TAG" --force
