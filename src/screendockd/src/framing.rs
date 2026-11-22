@@ -212,11 +212,7 @@ pub enum FramingError {
     EmptyContinuationChunk { index: usize },
     /// A continuation chunk's Report ID byte didn't match the first chunk's.
     #[error("chunk {index} Report ID {got} doesn't match first chunk's {expected}")]
-    ReportIdMismatch {
-        index: usize,
-        expected: u8,
-        got: u8,
-    },
+    ReportIdMismatch { index: usize, expected: u8, got: u8 },
     /// The chunk sequence ended before `total_len` bytes of payload were recovered.
     #[error("chunk sequence ended {missing} payload bytes short of total_len")]
     IncompleteMessage { missing: usize },
@@ -233,7 +229,12 @@ pub enum FramingError {
 /// This stays a pure, stateless function over a complete payload (per Design Patterns pattern
 /// 4) — callers that want `field_a = 0` enforced by the type system rather than remembering to
 /// pass it should use `MessageBuilder` (below) instead of calling this directly.
-pub fn frame_message(report_id: ReportId, field_a: u32, field_b: FieldB, payload: &[u8]) -> Vec<Vec<u8>> {
+pub fn frame_message(
+    report_id: ReportId,
+    field_a: u32,
+    field_b: FieldB,
+    payload: &[u8],
+) -> Vec<Vec<u8>> {
     let total_len = payload.len() as u32;
     let header = FrameHeader {
         report_id,
@@ -425,15 +426,17 @@ mod tests {
         assert_eq!(header.report_id, ReportId::Video);
         assert_eq!(header.field_a, 0);
         assert_eq!(header.field_b, FieldB(327_680));
-        assert_eq!(&chunks[0][HEADER_SIZE..HEADER_SIZE + 3], &[0xAA, 0xBB, 0xCC]);
+        assert_eq!(
+            &chunks[0][HEADER_SIZE..HEADER_SIZE + 3],
+            &[0xAA, 0xBB, 0xCC]
+        );
     }
 
     #[test]
     fn message_builder_control_matches_frame_message_byte_for_byte() {
         let payload = b"{\"jsonrpc\":\"2.0\"}";
         let via_builder = MessageBuilder::control().payload(payload).build();
-        let via_frame_message =
-            frame_message(ReportId::Control, 0, FieldB::zero(), payload);
+        let via_frame_message = frame_message(ReportId::Control, 0, FieldB::zero(), payload);
         assert_eq!(via_builder, via_frame_message);
     }
 }

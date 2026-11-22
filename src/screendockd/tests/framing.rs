@@ -63,7 +63,11 @@ fn heartbeat_payload() -> Vec<u8> {
 fn single_chunk_keyframe_bundle_matches_documented_byte_layout() {
     let payload = keyframe_bundle_3577_bytes();
     let field_b = field_b_for_width(PixelWidth(1280));
-    assert_eq!(field_b, FieldB(327_680), "baseline 1280-wide field B per the research doc");
+    assert_eq!(
+        field_b,
+        FieldB(327_680),
+        "baseline 1280-wide field B per the research doc"
+    );
 
     let chunks = frame_message(ReportId::Video, 0, field_b, &payload);
 
@@ -128,10 +132,16 @@ fn multi_chunk_inter_frame_requires_exactly_seventeen_chunks() {
     // A full continuation chunk (index 1): 1-byte Report ID + 4095 raw payload bytes, no header.
     let cont1 = &chunks[1];
     assert_eq!(cont1.len(), REPORT_SIZE);
-    assert_eq!(cont1[0], 2, "continuation chunk still carries the Report ID byte");
+    assert_eq!(
+        cont1[0], 2,
+        "continuation chunk still carries the Report ID byte"
+    );
     let expected_slice =
         &payload[FIRST_CHUNK_PAYLOAD_MAX..FIRST_CHUNK_PAYLOAD_MAX + CONTINUATION_CHUNK_PAYLOAD_MAX];
-    assert_eq!(&cont1[1..1 + CONTINUATION_CHUNK_PAYLOAD_MAX], expected_slice);
+    assert_eq!(
+        &cont1[1..1 + CONTINUATION_CHUNK_PAYLOAD_MAX],
+        expected_slice
+    );
 
     // The final (17th) chunk: partially filled (2161 payload bytes), zero-padded tail.
     let last = chunks.last().unwrap();
@@ -188,7 +198,11 @@ fn message_builder_video_entry_point_matches_frame_message_byte_for_byte() {
     let via_builder = MessageBuilder::video(PixelWidth(1280))
         .payload(&payload)
         .build();
-    let via_frame_message =
-        frame_message(ReportId::Video, 0, field_b_for_width(PixelWidth(1280)), &payload);
+    let via_frame_message = frame_message(
+        ReportId::Video,
+        0,
+        field_b_for_width(PixelWidth(1280)),
+        &payload,
+    );
     assert_eq!(via_builder, via_frame_message);
 }

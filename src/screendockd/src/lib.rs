@@ -6,10 +6,10 @@
 //! (device discovery + HID wire framing) in full, with the remaining modules present as typed
 //! stubs so the project structure is navigable ahead of later milestones.
 
+pub mod capture;
 pub mod discovery;
+pub mod encode;
 pub mod framing;
 pub mod heartbeat;
-pub mod capture;
-pub mod encode;
 pub mod hidraw_io;
 pub mod utils;
