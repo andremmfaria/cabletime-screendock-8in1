@@ -1,0 +1,35 @@
+# Default/example configuration for screendockd.
+#
+# This file at the repo root is read directly when running out of a git checkout (see
+# src/screendockd/src/utils/config.rs's resolution order). It is also the packaged
+# default/template shipped by the .deb/.rpm build to /etc/screendockd/screendock_cfg.toml (see
+# src/screendockd/Cargo.toml's [package.metadata.deb]/[package.metadata.generate-rpm] asset
+# lists) — a package install can't pre-populate every future user's $XDG_CONFIG_HOME, so this
+# system-wide file is the fallback default until a user has their own
+# ~/.config/screendockd/screendock_cfg.toml.
+#
+# Values below match the dock's confirmed native panel resolution and this project's current
+# milestone defaults; see docs/implementation-plan.md for the fields this config is expected to
+# grow into as later milestones (capture/encode/heartbeat) are implemented.
+
+[display]
+# Target capture/output resolution in pixels. Defaults to the dock's native panel size.
+width = 1280
+height = 720
+# One of "landscape" or "portrait".
+orientation = "landscape"
+
+[daemon]
+# Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via
+# the RUST_LOG environment variable, which takes precedence over this value (see
+# utils/logging.rs).
+log_level = "info"
+# Heartbeat tick interval for the MI_00 control channel, in milliseconds. The protocol spec
+# calls for roughly once per second.
+heartbeat_interval_ms = 1000
+
+[device]
+# USB vendor/product ID override, for testing against a different hidraw node setup (e.g. a
+# mocked device) without recompiling. Leave at the dock's real values for normal use.
+vendor_id_hex = "1de1"
+product_id_hex = "f201"

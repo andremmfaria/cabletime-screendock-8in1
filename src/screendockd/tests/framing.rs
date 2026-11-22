@@ -6,10 +6,16 @@
 //! available in this sandbox, and `framing.rs`'s job is the header/chunking math, not H.264
 //! content validation. Exact byte offsets/values asserted below come directly from the
 //! documented wire layout, not guessed.
+//!
+//! Updated for the Design Patterns newtype/builder refactor (see
+//! `docs/implementation-plan.md`'s Design Patterns section): `report_id`/`field_b` are now
+//! `ReportId`/`FieldB` values rather than bare `u8`/`u32`, and `PixelWidth` wraps the raw pixel
+//! count passed to `field_b_for_width`. The underlying byte-level assertions (exact header
+//! offsets, exact chunk counts, exact payload placement, exact zero-padding) are unchanged.
 
 use screendockd::framing::{
-    field_b_for_width, frame_message, parse_chunks, CONTINUATION_CHUNK_PAYLOAD_MAX,
-    FIRST_CHUNK_PAYLOAD_MAX, REPORT_ID_CONTROL, REPORT_ID_VIDEO, REPORT_SIZE,
+    field_b_for_width, frame_message, parse_chunks, FieldB, PixelWidth, ReportId,
+    CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, REPORT_SIZE,
 };
 
 /// Builds one Annex-B NAL unit: a 4-byte start code, a 1-byte NAL header
@@ -56,10 +62,10 @@ fn heartbeat_payload() -> Vec<u8> {
 #[test]
 fn single_chunk_keyframe_bundle_matches_documented_byte_layout() {
     let payload = keyframe_bundle_3577_bytes();
-    let field_b = field_b_for_width(1280);
-    assert_eq!(field_b, 327_680, "baseline 1280-wide field B per the research doc");
+    let field_b = field_b_for_width(PixelWidth(1280));
+    assert_eq!(field_b, FieldB(327_680), "baseline 1280-wide field B per the research doc");
 
-    let chunks = frame_message(REPORT_ID_VIDEO, 0, field_b, &payload);
+    let chunks = frame_message(ReportId::Video, 0, field_b, &payload);
 
     // 3577 < 4080 (FIRST_CHUNK_PAYLOAD_MAX): must fit in exactly one chunk.
     assert_eq!(chunks.len(), 1);
@@ -81,18 +87,18 @@ fn single_chunk_keyframe_bundle_matches_documented_byte_layout() {
 
     // Round-trip back through parse_chunks.
     let parsed = parse_chunks(&chunks).unwrap();
-    assert_eq!(parsed.report_id, 2);
+    assert_eq!(parsed.report_id, ReportId::Video);
     assert_eq!(parsed.field_a, 0);
-    assert_eq!(parsed.field_b, 327_680);
+    assert_eq!(parsed.field_b, FieldB(327_680));
     assert_eq!(parsed.payload, payload);
 }
 
 #[test]
 fn multi_chunk_inter_frame_requires_exactly_seventeen_chunks() {
     let payload = inter_frame_67666_bytes();
-    let field_b = field_b_for_width(1280);
+    let field_b = field_b_for_width(PixelWidth(1280));
 
-    let chunks = frame_message(REPORT_ID_VIDEO, 0, field_b, &payload);
+    let chunks = frame_message(ReportId::Video, 0, field_b, &payload);
 
     // 4080 (first chunk) + 16 * 4095 (if all continuation chunks were full) would be 69,  520
     // bytes of capacity; the documented fixture needs exactly 17 chunks total (1 first +
@@ -140,9 +146,9 @@ fn multi_chunk_inter_frame_requires_exactly_seventeen_chunks() {
 
     // Round-trip back through parse_chunks.
     let parsed = parse_chunks(&chunks).unwrap();
-    assert_eq!(parsed.report_id, 2);
+    assert_eq!(parsed.report_id, ReportId::Video);
     assert_eq!(parsed.field_a, 0);
-    assert_eq!(parsed.field_b, 327_680);
+    assert_eq!(parsed.field_b, FieldB(327_680));
     assert_eq!(parsed.payload, payload);
 }
 
@@ -151,9 +157,9 @@ fn mi00_heartbeat_control_message_is_single_chunk_report_id_one() {
     let payload = heartbeat_payload();
     // MI_00 control channel: field B's semantics are video-specific (width * 256) per the
     // research doc; for a non-video control message there's no documented meaning for field B,
-    // so this test uses 0 as the structurally sensible default — field A is always 0 regardless
-    // of channel per the research doc's live-tested finding.
-    let chunks = frame_message(REPORT_ID_CONTROL, 0, 0, &payload);
+    // so this test uses FieldB::zero() as the structurally sensible default — field A is always
+    // 0 regardless of channel per the research doc's live-tested finding.
+    let chunks = frame_message(ReportId::Control, 0, FieldB::zero(), &payload);
 
     assert_eq!(chunks.len(), 1);
     let chunk = &chunks[0];
@@ -163,10 +169,26 @@ fn mi00_heartbeat_control_message_is_single_chunk_report_id_one() {
     assert_eq!(&chunk[16..16 + payload.len()], payload.as_slice());
 
     let parsed = parse_chunks(&chunks).unwrap();
-    assert_eq!(parsed.report_id, 1);
+    assert_eq!(parsed.report_id, ReportId::Control);
     assert_eq!(parsed.payload, payload);
     // Sanity check this is well-formed JSON of the documented heartbeat shape.
     let text = std::str::from_utf8(&parsed.payload).unwrap();
     assert!(text.contains(r#""method":"heartbeat""#));
     assert!(text.contains(r#""jsonrpc":"2.0""#));
+}
+
+#[test]
+fn message_builder_video_entry_point_matches_frame_message_byte_for_byte() {
+    // Confirms MessageBuilder::video(...) (Design Patterns pattern 3) produces exactly the same
+    // wire bytes frame_message does when fed the equivalent arguments directly — the builder is
+    // an ergonomic/type-safety wrapper, not a behavior change.
+    use screendockd::framing::MessageBuilder;
+
+    let payload = keyframe_bundle_3577_bytes();
+    let via_builder = MessageBuilder::video(PixelWidth(1280))
+        .payload(&payload)
+        .build();
+    let via_frame_message =
+        frame_message(ReportId::Video, 0, field_b_for_width(PixelWidth(1280)), &payload);
+    assert_eq!(via_builder, via_frame_message);
 }

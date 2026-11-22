@@ -23,12 +23,20 @@
 //! layout (per `docs/implementation-plan.md`'s clean-room rule) — it does not reference, and was
 //! not derived from, any decompiled vendor code; the sysfs layout itself is standard Linux
 //! kernel/udev behavior, not anything vendor-specific.
+//!
+//! Per `docs/implementation-plan.md`'s Design Patterns section (pattern 2, newtype), `Mi00Path`
+//! and `Mi01Path` are distinct types rather than two same-typed `PathBuf` fields, so a future
+//! call site that accidentally swaps the control and video paths (e.g. opening MI_00 where
+//! MI_01 was intended) is a compile error, not a runtime bug discovered on real hardware. Per
+//! pattern 7, `DiscoveryError` uses `thiserror`'s derive instead of hand-written `Display`/
+//! `Error` impls, with no change to the variant shapes or matching behavior.
 
-use std::error::Error;
-use std::fmt;
 use std::fs;
 use std::io;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
+
+use thiserror::Error;
 
 /// The dock's USB vendor ID, lowercase hex, as it appears in sysfs `idVendor`.
 pub const VENDOR_ID_HEX: &str = "1de1";
@@ -48,53 +56,106 @@ pub const DEFAULT_SYSFS_HIDRAW_BASE: &str = "/sys/class/hidraw";
 /// Default directory the resolved device-node paths are constructed under.
 pub const DEFAULT_DEV_DIR: &str = "/dev";
 
+/// The resolved `/dev/hidrawN` path for MI_00 (control/heartbeat channel, Report ID 1).
+///
+/// A distinct newtype rather than a bare `PathBuf` so this path can never be passed where a
+/// `Mi01Path` is expected (or vice versa) without an explicit, deliberate conversion — the
+/// compiler catches a swapped-channel bug that would otherwise only surface as a silently
+/// miswired heartbeat/video channel on real hardware.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mi00Path(PathBuf);
+
+/// The resolved `/dev/hidrawN` path for MI_01 (video channel, Report ID 2). See `Mi00Path` for
+/// why this is a distinct newtype rather than a bare `PathBuf`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mi01Path(PathBuf);
+
+impl Mi00Path {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> PathBuf {
+        self.0
+    }
+}
+
+impl Mi01Path {
+    pub fn new(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> PathBuf {
+        self.0
+    }
+}
+
+impl Deref for Mi00Path {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Deref for Mi01Path {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for Mi00Path {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for Mi01Path {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// Resolved `/dev/hidrawN` paths for the dock's two HID interfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DockHidrawPaths {
     /// MI_00: control/heartbeat channel (Report ID 1).
-    pub mi00: PathBuf,
+    pub mi00: Mi00Path,
     /// MI_01: video channel (Report ID 2).
-    pub mi01: PathBuf,
+    pub mi01: Mi01Path,
 }
 
 /// Errors from resolving the dock's hidraw nodes.
-#[derive(Debug)]
+///
+/// Per `docs/implementation-plan.md`'s Design Patterns section (pattern 7), this uses
+/// `thiserror`'s derive rather than hand-written `Display`/`Error` impls — the de facto
+/// convention for a module exposing matchable error variants to its callers. Variant shapes are
+/// unchanged from the pre-refactor version; only the boilerplate moved.
+#[derive(Debug, Error)]
 pub enum DiscoveryError {
     /// The sysfs hidraw class directory couldn't be read at all (e.g. doesn't exist, no
     /// permission) — distinct from "no matching device found".
+    #[error("couldn't read hidraw class dir {path:?}: {source}")]
     HidrawClassDirUnreadable { path: PathBuf, source: io::Error },
     /// Walked every hidraw entry and found neither interface 0 nor interface 1 on a device
     /// matching the dock's VID/PID.
+    #[error("no hidraw device matching VID {VENDOR_ID_HEX}:PID {PRODUCT_ID_HEX} found")]
     NoDockInterfacesFound,
     /// Found MI_01 (interface 1) on a matching device, but not MI_00 (interface 0).
+    #[error("found the dock's MI_01 (video) but not its MI_00 (control/heartbeat) interface")]
     Mi00NotFound,
     /// Found MI_00 (interface 0) on a matching device, but not MI_01 (interface 1).
+    #[error("found the dock's MI_00 (control/heartbeat) but not its MI_01 (video) interface")]
     Mi01NotFound,
 }
-
-impl fmt::Display for DiscoveryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DiscoveryError::HidrawClassDirUnreadable { path, source } => {
-                write!(f, "couldn't read hidraw class dir {path:?}: {source}")
-            }
-            DiscoveryError::NoDockInterfacesFound => write!(
-                f,
-                "no hidraw device matching VID {VENDOR_ID_HEX}:PID {PRODUCT_ID_HEX} found"
-            ),
-            DiscoveryError::Mi00NotFound => write!(
-                f,
-                "found the dock's MI_01 (video) but not its MI_00 (control/heartbeat) interface"
-            ),
-            DiscoveryError::Mi01NotFound => write!(
-                f,
-                "found the dock's MI_00 (control/heartbeat) but not its MI_01 (video) interface"
-            ),
-        }
-    }
-}
-
-impl Error for DiscoveryError {}
 
 /// Reads a sysfs attribute file and returns its trimmed contents, or `None` on any I/O/parse
 /// problem. Discovery treats a missing/unreadable attribute on a given hidraw entry as "this
@@ -181,7 +242,10 @@ pub fn discover_dock_hidraw(
     }
 
     match (mi00, mi01) {
-        (Some(mi00), Some(mi01)) => Ok(DockHidrawPaths { mi00, mi01 }),
+        (Some(mi00), Some(mi01)) => Ok(DockHidrawPaths {
+            mi00: Mi00Path::new(mi00),
+            mi01: Mi01Path::new(mi01),
+        }),
         (None, Some(_)) => Err(DiscoveryError::Mi00NotFound),
         (Some(_), None) => Err(DiscoveryError::Mi01NotFound),
         (None, None) => Err(DiscoveryError::NoDockInterfacesFound),
@@ -271,10 +335,10 @@ mod tests {
 
         let result = discover_dock_hidraw(&sysfs_hidraw_base, &dev_dir).unwrap();
 
-        assert_eq!(result.mi00, dev_dir.join("hidraw0"));
-        assert_eq!(result.mi01, dev_dir.join("hidraw1"));
+        assert_eq!(result.mi00.as_path(), dev_dir.join("hidraw0"));
+        assert_eq!(result.mi01.as_path(), dev_dir.join("hidraw1"));
         // hidraw3 (unrelated vendor, interface 0) must never have been picked as mi00.
-        assert_ne!(result.mi00, dev_dir.join("hidraw3"));
+        assert_ne!(result.mi00.as_path(), dev_dir.join("hidraw3"));
 
         let _ = fs::remove_dir_all(&base);
     }

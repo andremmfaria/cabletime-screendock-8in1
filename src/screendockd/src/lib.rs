@@ -12,3 +12,4 @@ pub mod heartbeat;
 pub mod capture;
 pub mod encode;
 pub mod hidraw_io;
+pub mod utils;

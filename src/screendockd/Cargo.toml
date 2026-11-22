@@ -16,9 +16,31 @@ name = "screendockd"
 path = "src/main.rs"
 
 [dependencies]
-# Milestone 1 (device discovery + HID wire framing) needs only the standard library.
-# Later milestones add, per docs/implementation-plan.md's "Concrete Technology Choices":
-#   - serde / serde_json          (Milestone 3: heartbeat.rs JSON-RPC message construction)
+# Design Patterns section (pattern 7, thiserror/anyhow split): typed error enums in
+# discovery.rs/framing.rs now derive via thiserror instead of hand-written Display/Error impls.
+thiserror = "1"
+# utils/config.rs (personal project convention, see docs/implementation-plan.md's Design
+# Patterns section): serde + toml for simple, idiomatic TOML deserialization — chosen over the
+# `config` crate because the layered-source/env-var-override machinery `config` offers is
+# redundant here, since this project hand-implements its own explicit 4-step resolution order
+# (env var -> XDG user config -> /etc system default -> repo-root dev path) rather than
+# delegating source precedence to a config-merging library.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# utils/config.rs: resolves the XDG user config directory ($XDG_CONFIG_HOME, defaulting to
+# ~/.config) correctly and cross-platform-safely, rather than hand-rolling HOME-env-var string
+# concatenation.
+dirs = "5"
+# utils/logging.rs (personal project convention): tracing + tracing-subscriber, chosen over
+# log + env_logger because this daemon is a concurrent multi-loop program (capture/encode/
+# heartbeat threads per the Architecture section) and tracing's spans let each loop's log lines
+# carry structured, span-scoped context (e.g. which loop/thread emitted a line) that plain `log`
+# has no equivalent for.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Milestone 1 (device discovery + HID wire framing) needs only the standard library beyond the
+# above. Later milestones add, per docs/implementation-plan.md's "Concrete Technology Choices":
+#   - serde_json                  (Milestone 3: heartbeat.rs JSON-RPC message construction)
 #   - ffmpeg-next / ffmpeg_sys_next (Milestone 5: encode.rs, libx264 via libavcodec)
 #   - x11 / xcb-family crate       (Milestone 4: capture/x11_shm.rs)
 #   - ashpd, pipewire              (Milestone 4: capture/wayland_portal.rs)
@@ -42,6 +64,12 @@ assets = [
     ["target/release/screendockd", "usr/bin/screendockd", "755"],
     ["../../deploy/99-screendock.rules", "lib/udev/rules.d/99-screendock.rules", "644"],
     ["../../deploy/screendockd.service", "usr/lib/systemd/user/screendockd.service", "644"],
+    # Packaged default/template config. utils/config.rs's resolution order falls back to this
+    # system-wide path (step 3 of 4) when no per-user $XDG_CONFIG_HOME/screendockd/ config
+    # exists yet — a package install can't pre-populate every future user's home directory, so
+    # it ships a template here instead; see utils/config.rs and docs/implementation-plan.md's
+    # Design Patterns section for the full resolution order.
+    ["../../config/screendock_cfg.toml", "etc/screendockd/screendock_cfg.toml", "644"],
 ]
 
 # Packaging metadata for `cargo-generate-rpm` (CI builds this via `cargo generate-rpm`).
@@ -52,4 +80,7 @@ assets = [
     { source = "target/release/screendockd", dest = "/usr/bin/screendockd", mode = "755" },
     { source = "../../deploy/99-screendock.rules", dest = "/usr/lib/udev/rules.d/99-screendock.rules", mode = "644" },
     { source = "../../deploy/screendockd.service", dest = "/usr/lib/systemd/user/screendockd.service", mode = "644" },
+    # See the matching entry in [package.metadata.deb] above for why this ships a system-wide
+    # template rather than relying solely on a per-user XDG config.
+    { source = "../../config/screendock_cfg.toml", dest = "/etc/screendockd/screendock_cfg.toml", mode = "644" },
 ]
