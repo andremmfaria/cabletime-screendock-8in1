@@ -58,7 +58,7 @@ pub fn init_logging(config: &Config) -> Result<(), Box<dyn std::error::Error + S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::config::{DaemonConfig, DeviceConfig, DisplayConfig};
+    use crate::utils::config::{CaptureConfig, DaemonConfig, DeviceConfig, DisplayConfig};
 
     fn test_config(log_level: &str) -> Config {
         Config {
@@ -67,6 +67,7 @@ mod tests {
                 height: 720,
                 orientation: "landscape".to_string(),
             },
+            capture: CaptureConfig::default(),
             daemon: DaemonConfig {
                 log_level: log_level.to_string(),
                 heartbeat_interval_ms: 1000,

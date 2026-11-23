@@ -86,6 +86,41 @@ pub struct DisplayConfig {
     pub orientation: String,
 }
 
+/// Which capture backend to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureBackendChoice {
+    /// Follow the detected session type (`$XDG_SESSION_TYPE`, `$WAYLAND_DISPLAY`, `$DISPLAY`).
+    #[default]
+    Auto,
+    /// XShm capture of an X11 display.
+    X11,
+    /// xdg-desktop-portal ScreenCast over PipeWire (needs the `capture-wayland` build feature).
+    Wayland,
+}
+
+/// Screen capture settings. Every field is optional in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct CaptureConfig {
+    /// Backend selection; `auto` follows the detected session.
+    pub backend: CaptureBackendChoice,
+    /// X11 display to capture, for example `":0"`. Unset means `$DISPLAY`.
+    pub x11_display: Option<String>,
+    /// Capture frame rate. Zero captures as fast as the backend allows.
+    pub fps: u32,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            backend: CaptureBackendChoice::Auto,
+            x11_display: None,
+            fps: 25,
+        }
+    }
+}
+
 /// Daemon-level runtime settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DaemonConfig {
@@ -110,6 +145,8 @@ pub struct DeviceConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Config {
     pub display: DisplayConfig,
+    #[serde(default)]
+    pub capture: CaptureConfig,
     pub daemon: DaemonConfig,
     pub device: DeviceConfig,
 }
@@ -219,6 +256,9 @@ mod tests {
         assert_eq!(config.display.width, 1280);
         assert_eq!(config.display.height, 720);
         assert_eq!(config.display.orientation, "landscape");
+        assert_eq!(config.capture.backend, CaptureBackendChoice::Auto);
+        assert_eq!(config.capture.x11_display, None);
+        assert_eq!(config.capture.fps, 25);
         assert_eq!(config.daemon.log_level, "info");
         assert_eq!(config.daemon.heartbeat_interval_ms, 1000);
         assert_eq!(config.device.vendor_id_hex, "1de1");
@@ -242,6 +282,23 @@ mod tests {
         env::remove_var(CONFIG_PATH_ENV_VAR);
 
         assert_eq!(resolved, Some(repo_root_config));
+    }
+
+    #[test]
+    fn capture_section_is_optional_and_parses_overrides() {
+        let base = "[display]\nwidth = 1\nheight = 2\norientation = \"landscape\"\n\
+                    [daemon]\nlog_level = \"info\"\nheartbeat_interval_ms = 1000\n\
+                    [device]\nvendor_id_hex = \"1de1\"\nproduct_id_hex = \"f201\"\n";
+        let without: Config = toml::from_str(base).unwrap();
+        assert_eq!(without.capture, CaptureConfig::default());
+
+        let with: Config = toml::from_str(&format!(
+            "{base}[capture]\nbackend = \"x11\"\nx11_display = \":7\"\nfps = 10\n"
+        ))
+        .unwrap();
+        assert_eq!(with.capture.backend, CaptureBackendChoice::X11);
+        assert_eq!(with.capture.x11_display.as_deref(), Some(":7"));
+        assert_eq!(with.capture.fps, 10);
     }
 
     #[test]

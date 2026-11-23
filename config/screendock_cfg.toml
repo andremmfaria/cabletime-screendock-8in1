@@ -19,6 +19,15 @@ height = 720
 # One of "landscape" or "portrait".
 orientation = "landscape"
 
+[capture]
+# One of "auto", "x11" or "wayland". "auto" follows the detected session ($XDG_SESSION_TYPE, then
+# $WAYLAND_DISPLAY, then $DISPLAY). "wayland" needs a build with the capture-wayland feature.
+backend = "auto"
+# X11 display to capture, for example ":0". Leave unset to use $DISPLAY.
+# x11_display = ":0"
+# Capture frame rate. 0 captures as fast as the backend allows.
+fps = 25
+
 [daemon]
 # Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via
 # the RUST_LOG environment variable, which takes precedence over this value (see
