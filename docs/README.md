@@ -10,8 +10,10 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [protocol-implementation.md](protocol-implementation.md) | How the wire protocol is implemented: framing, hidraw I/O, heartbeat, Annex-B splitting |
 | [configuration.md](configuration.md) | Config file resolution, fields, command line, environment variables |
 | [capture.md](capture.md) | Capture layer: frame types, backend selection, X11 XShm and Wayland portal backends, the `capture` command |
+| [encoding.md](encoding.md) | Encoder trait, libx264 and prerecorded encoders, message policy, the `bench` CPU measurement |
+| [daemon.md](daemon.md) | The `run` daemon: startup, loops, error policy, shutdown, resolution picker, device section |
 | [testing.md](testing.md) | Test layers, how to run them, and what each one covers |
-| [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing (M2) and heartbeat isolation (M3), and what to record |
+| [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing (M2) and heartbeat isolation (M3), the streaming daemon (M6), the resolution picker (M7), and what to record |
 
 ## Device and research pages
 

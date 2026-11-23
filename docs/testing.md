@@ -10,7 +10,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI runs the same checks, plus a clippy run with `--features capture-wayland` after installing the PipeWire development packages. No default test needs a dock, a hidraw node or a physical display. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`.
+CI runs the same checks, plus a clippy run with `--features capture-wayland` after installing the PipeWire development packages, and a separate `encode-ffmpeg` job that installs the libav development packages and runs clippy and the full test suite with `--features encode-ffmpeg`. No default test needs a dock, a hidraw node or a physical display. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`.
 
 ## Capture, Stage 1: Xvfb
 
@@ -39,6 +39,26 @@ DISPLAY=:99 cargo run -- capture --backend x11 --frames 3 --out-dir /tmp/capture
 ```
 
 The PNG files show the empty Xvfb root window; paint something first (for example with `xsetroot -solid red`) to see content.
+
+## Encoder
+
+Unit tests cover the message policy (`messages_from_packet`), the prerecorded encoder (looping, keyframe restart, rejection of streams without a leading keyframe), `DisplayGeometry` (field B for 1280, 900 and portrait 720x1280, orientation and range checks) and device ID parsing and override in discovery.
+
+`tests/encode_ffmpeg.rs` is built only with `--features encode-ffmpeg`, which needs the libav development files, `libx264-dev`, `clang` and `pkg-config`. It encodes a synthetic BGRA sequence with the libx264 encoder, checks the message shape and the SPS profile, and decodes the result with the `ffmpeg` command line tool. When the `ffmpeg` binary is missing the decode checks print a skip note and pass; with `SCREENDOCK_REQUIRE_FFMPEG` set to any value they fail instead. CI sets it.
+
+```text
+cargo test --features encode-ffmpeg
+```
+
+Status: this feature does not compile on hosts without the libav development files; CI is where it is built and tested.
+
+## Daemon
+
+`tests/daemon_e2e.rs` runs the real `screendockd run` binary against Xvfb with the prerecorded encoder and regular files for MI_00 and MI_01, and checks the written video messages against the source stream, the heartbeat, graceful exit on SIGTERM and SIGINT, and fail-fast startup. Unit tests in `src/daemon.rs` cover the error policy with synthetic backends and loopback files. These tests need Xvfb on the same terms as the capture tests (`SCREENDOCK_REQUIRE_XVFB`). See [daemon.md](daemon.md#tests).
+
+## CPU measurement
+
+`screendockd bench` measures capture plus encode CPU time; see [encoding.md](encoding.md#cpu-measurement). The unit tests check the arithmetic and the loop with a synthetic backend; the figure that matters needs the target host and the libx264 build.
 
 ## Capture, Stage 1: Wayland
 
