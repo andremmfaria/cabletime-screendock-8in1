@@ -7,7 +7,7 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | Page | Contents |
 |---|---|
 | [architecture.md](architecture.md) | Modules, data flow, and implementation status of each one |
-| [protocol-implementation.md](protocol-implementation.md) | How the wire protocol is implemented: framing, hidraw I/O, heartbeat, Annex-B splitting |
+| [protocol-implementation.md](protocol-implementation.md) | How the wire protocol is implemented: framing, hidraw I/O, heartbeat, session handshake, Annex-B splitting |
 | [configuration.md](configuration.md) | Config file resolution, fields, command line, environment variables |
 | [capture.md](capture.md) | Capture layer: frame types, backend selection, X11 XShm and Wayland portal backends, the `capture` command |
 | [encoding.md](encoding.md) | Encoder trait, libx264 and prerecorded encoders, message policy, the `bench` CPU measurement |

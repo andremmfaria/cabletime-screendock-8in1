@@ -6,7 +6,9 @@
 //!   heartbeat-dependency isolation).
 //!
 //! Everything takes already-open `HidrawHandle`s, so the same code runs against the real nodes
-//! on the dock and against a file/pipe/pty loopback in tests. The routines only measure and
+//! on the dock and against a file/pipe/socket loopback in tests. Where video is sent together
+//! with an MI_00 handle, the dock session (heartbeat, reader and handshake, see `session.rs`)
+//! runs first and video starts only once it is armed. The routines only measure and
 //! report; what the panel shows is observed by the person running them.
 
 use std::fmt;
@@ -16,8 +18,9 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::framing::{MessageBuilder, PictureSize, ReportId};
-use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
+use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats, SessionId};
 use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
 
 /// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
 /// Milestone 2 exit criterion is at or below this figure.
@@ -47,6 +50,30 @@ pub enum ValidationError {
     /// The heartbeat thread panicked.
     #[error("heartbeat thread panicked")]
     HeartbeatPanicked,
+    /// The dock session failed to start or ended.
+    #[error("session failed: {0}")]
+    Session(#[from] SessionError),
+    /// The session did not become armed in time.
+    #[error("dock session not armed within {0:?}")]
+    NotArmed(Duration),
+    /// The session ended for good.
+    #[error("dock session ended: {0}")]
+    SessionEnded(String),
+}
+
+/// Waits until `session` is armed for video, for at most `limit`.
+pub fn wait_until_armed(session: &SessionHandle, limit: Duration) -> Result<(), ValidationError> {
+    let deadline = Instant::now() + limit;
+    while !session.is_armed() {
+        if let Some(reason) = session.fatal() {
+            return Err(ValidationError::SessionEnded(reason));
+        }
+        if Instant::now() >= deadline {
+            return Err(ValidationError::NotArmed(limit));
+        }
+        std::thread::sleep(SLEEP_SLICE);
+    }
+    Ok(())
 }
 
 fn nal(nal_type: u8, nal_ref_idc: u8, body_len: usize) -> Vec<u8> {
@@ -256,6 +283,10 @@ pub struct IsolateParams {
     pub duration: Duration,
     pub heartbeat_interval: Duration,
     pub size: PictureSize,
+    /// MI_00 session settings. `Some` runs the dock session (handshake, reader, heartbeat) on
+    /// the MI_00 handle and gates video on it; `None` sends a bare heartbeat loop and ungated
+    /// video, which a dock that has not been handshaken discards.
+    pub session: Option<SessionSettings>,
     pub fps: u32,
     /// One looped group of pictures: element 0 must be the keyframe bundle, the rest
     /// inter-frames. The loop restarts at the keyframe each time it wraps.
@@ -268,6 +299,8 @@ pub struct IsolateReport {
     pub mode: IsolateMode,
     pub elapsed: Duration,
     pub heartbeat: Option<HeartbeatStats>,
+    /// Session counters when the dock session ran.
+    pub session: Option<SessionStats>,
     pub video_messages: usize,
     pub video_chunk_stats: Option<TimingStats>,
     /// Frames whose send finished after their scheduled slot (the stream fell behind `fps`).
@@ -284,7 +317,14 @@ impl fmt::Display for IsolateReport {
         )?;
         match &self.heartbeat {
             Some(h) => writeln!(f, "heartbeat ticks sent: {}", h.ticks_sent)?,
-            None => writeln!(f, "heartbeat: not run")?,
+            None => match &self.session {
+                Some(s) => writeln!(
+                    f,
+                    "session: heartbeats sent {}, dock heartbeats seen {}, handshakes {}, losses {}",
+                    s.heartbeats_sent, s.dock_heartbeats_seen, s.handshakes, s.losses
+                )?,
+                None => writeln!(f, "heartbeat: not run")?,
+            },
         }
         if self.mode.video() {
             writeln!(
@@ -325,6 +365,7 @@ fn run_video_paced(
     gop: &[Vec<u8>],
     fps: u32,
     duration: Duration,
+    session: Option<&SessionHandle>,
 ) -> Result<VideoOutcome, ValidationError> {
     let framed: Vec<Vec<Vec<u8>>> = gop.iter().map(|m| video_chunks(size, m)).collect();
     let frame_period = Duration::from_secs_f64(1.0 / f64::from(fps));
@@ -336,9 +377,36 @@ fn run_video_paced(
         late: 0,
     };
     let mut index = 0usize;
+    let mut generation = 0u64;
+    let mut next_slot = start;
     while start.elapsed() < duration {
-        let slot_end = start + frame_period * (outcome.messages as u32 + 1);
-        let timings = handle.write_chunks(&framed[index % framed.len()])?;
+        if let Some(session) = session {
+            if let Some(reason) = session.fatal() {
+                return Err(ValidationError::SessionEnded(reason));
+            }
+            if !session.is_armed() {
+                std::thread::sleep(SLEEP_SLICE);
+                continue;
+            }
+            if session.generation() != generation {
+                // The dock may have lost its decoder state: restart at the keyframe and
+                // re-base the pacing so the wait is not counted as lateness.
+                generation = session.generation();
+                index = 0;
+                next_slot = Instant::now();
+            }
+        }
+        let slot_end = next_slot + frame_period;
+        next_slot = slot_end;
+        let timings = match handle.write_chunks(&framed[index % framed.len()]) {
+            Ok(timings) => timings,
+            Err(e) => {
+                if let Some(session) = session {
+                    session.report_failure("video write failed");
+                }
+                return Err(e.into());
+            }
+        };
         outcome.chunk_samples.extend(timings.per_chunk);
         outcome.messages += 1;
         index += 1;
@@ -382,10 +450,28 @@ pub fn run_isolate(
     let start = Instant::now();
     let deadline = start + params.duration;
 
+    // The session needs its own descriptor, so a cloned handle goes to it and the original
+    // stays with the caller. Only modes with an MI_00 handle run a session.
+    let session = match (&params.session, mi00.as_deref()) {
+        (Some(settings), Some(handle)) => {
+            Some(Session::start(handle.try_clone()?, settings.clone())?)
+        }
+        _ => None,
+    };
+    let session_handle = session.as_ref().map(Session::handle);
+    // With a session the heartbeat runs inside it; without one the bare loop runs here.
+    let bare_heartbeat_handle = if session.is_some() { None } else { mi00 };
+
     let (heartbeat, video) = std::thread::scope(|scope| {
-        let hb_thread = mi00.map(|handle| {
+        let hb_thread = bare_heartbeat_handle.map(|handle| {
             let stop = &stop;
-            scope.spawn(move || run_heartbeat_loop(handle, params.heartbeat_interval, stop, None))
+            let id = params
+                .session
+                .as_ref()
+                .map_or_else(SessionId::generate, |s| s.session_id.clone());
+            scope.spawn(move || {
+                run_heartbeat_loop(handle, &id, params.heartbeat_interval, stop, None)
+            })
         });
 
         let video = match mi01 {
@@ -395,6 +481,7 @@ pub fn run_isolate(
                 &params.gop,
                 params.fps,
                 params.duration,
+                session_handle.as_ref(),
             )
             .map(Some),
             None => {
@@ -414,6 +501,7 @@ pub fn run_isolate(
         (heartbeat, video)
     });
 
+    let session_stats = session.map(Session::shutdown).transpose()?;
     let video = video?;
     let heartbeat = heartbeat?;
     let (video_messages, video_chunk_stats, video_late_frames) = match video {
@@ -428,6 +516,7 @@ pub fn run_isolate(
         mode,
         elapsed: start.elapsed(),
         heartbeat,
+        session: session_stats,
         video_messages,
         video_chunk_stats,
         video_late_frames,
@@ -511,6 +600,7 @@ mod tests {
             duration: Duration::from_millis(300),
             heartbeat_interval: Duration::from_millis(50),
             size: PictureSize::new(1280, 720),
+            session: None,
             fps: 25,
             gop: vec![synthetic_keyframe_bundle(), vec![0, 0, 0, 1, 0x41, 1, 2, 3]],
         }
@@ -572,5 +662,28 @@ mod tests {
         )
         .is_err());
         assert!(run_isolate(&params(IsolateMode::Video), None, None).is_err());
+    }
+
+    #[test]
+    fn isolate_both_with_session_waits_for_the_handshake_before_video() {
+        use crate::fake_dock::{FakeDock, FakeDockConfig};
+        let (dock, mut mi00, mut mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
+        let mut p = params(IsolateMode::Both);
+        p.duration = Duration::from_millis(1500);
+        let mut settings = SessionSettings::new(p.size, Duration::from_millis(50));
+        settings.settle_delay = Duration::from_millis(100);
+        settings.ready_timeout = Duration::from_millis(500);
+        settings.reply_timeout = Duration::from_millis(500);
+        p.session = Some(settings);
+        let report = run_isolate(&p, Some(&mut mi00), Some(&mut mi01)).unwrap();
+        let session = report.session.as_ref().unwrap();
+        assert_eq!(session.handshakes, 1);
+        assert!(report.video_messages >= 3, "{}", report.video_messages);
+        // Let the fake drain the socket before reading its counters.
+        std::thread::sleep(Duration::from_millis(100));
+        let video = dock.video_stats();
+        assert_eq!(video.reports_before_sink, 0);
+        assert_eq!(video.layout_violations, 0);
+        assert!(report.to_string().contains("handshakes 1"));
     }
 }

@@ -40,6 +40,10 @@ DISPLAY=:99 cargo run -- capture --backend x11 --frames 3 --out-dir /tmp/capture
 
 The PNG files show the empty Xvfb root window; paint something first (for example with `xsetroot -solid red`) to see content.
 
+## Session and simulated dock
+
+`fake_dock::FakeDock` stands in for the dock: MI_00 and MI_01 are Unix datagram socket pairs (datagrams keep report boundaries like a hidraw read), and a thread speaks the dock side. A fresh dock announces ready and answers `app-launched` and `notify-projection-started`; a dock that holds a session only heartbeats. It records every host message byte for byte, checks the MI_00 report layout (4096 bytes, Report ID 1, zero header bytes) and the MI_01 header layout, and counts video reports that arrive before its sink is started. Tests in `session.rs` cover the exact bytes of every host message, the inbound assembler and parser, the full handshake order, the settle delay, the bounded fallback to `AssumedActive`, a silent dock that never arms, denied projection, loss on a re-announced ready and on a reported write failure (with the handshake redone and ids continuing), heartbeat cadence, startup failures and reader end of stream. `tests/session_dock.rs` runs `daemon::run` against the fake dock. `validation.rs` has an `isolate` run with a session. These tests need no display and no hardware.
+
 ## Encoder
 
 Unit tests cover the message policy (`messages_from_packet`), the prerecorded encoder (looping, keyframe restart, rejection of streams without a leading keyframe), `DisplayGeometry` (header size for 1280x720, 900x600 and portrait 720x1280, orientation and range checks) and device ID parsing and override in discovery.
@@ -54,7 +58,7 @@ Status: this feature does not compile on hosts without the libav development fil
 
 ## Daemon
 
-`tests/daemon_e2e.rs` runs the real `screendockd run` binary against Xvfb with the prerecorded encoder and regular files for MI_00 and MI_01, and checks the written video messages against the source stream, the heartbeat, graceful exit on SIGTERM and SIGINT, and fail-fast startup. Unit tests in `src/daemon.rs` cover the error policy with synthetic backends and loopback files. These tests need Xvfb on the same terms as the capture tests (`SCREENDOCK_REQUIRE_XVFB`). See [daemon.md](daemon.md#tests).
+`tests/daemon_e2e.rs` runs the real `screendockd run --no-handshake` binary against Xvfb with the prerecorded encoder and regular files for MI_00 and MI_01 (files cannot hold a dock conversation), and checks the written video messages against the source stream, the heartbeat, graceful exit on SIGTERM and SIGINT, and fail-fast startup. Unit tests in `src/daemon.rs` cover the error policy with synthetic backends and loopback files. These tests need Xvfb on the same terms as the capture tests (`SCREENDOCK_REQUIRE_XVFB`). See [daemon.md](daemon.md#tests).
 
 ## CPU measurement
 

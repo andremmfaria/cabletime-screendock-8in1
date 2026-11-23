@@ -93,7 +93,7 @@ The first existing file in this order is used:
 screendockd run
 ```
 
-This discovers the dock, starts the heartbeat, and streams the desktop until SIGINT or SIGTERM. Use `RUST_LOG=debug` for more logging. `screendockd --help` lists every command.
+This discovers the dock, starts the heartbeat and the session handshake, and streams the desktop until SIGINT or SIGTERM. Use `RUST_LOG=debug` for more logging. `screendockd --help` lists every command.
 
 ## Validation subcommands
 
@@ -113,7 +113,7 @@ This discovers the dock, starts the heartbeat, and streams the desktop until SIG
 - `Permission denied` opening a node: the udev rule is not installed, the group does not exist, or you have not logged in again after `usermod`. Check `groups` and `ls -l /dev/hidraw*`.
 - `encoder ffmpeg unavailable`: the binary was built without `encode-ffmpeg`. Use a packaged build or rebuild with the feature.
 - Capture fails with no session: `DISPLAY` is not set in the service environment. Run `systemctl --user import-environment DISPLAY XAUTHORITY` from your session, or set `capture.x11_display` in the config.
-- The panel shows "Connecting Signal...": the heartbeat is not reaching MI_00. Check the log for write errors.
+- The panel shows "Connecting Signal...": the heartbeat is not reaching MI_00 or the handshake has not completed. Check the log for write errors and for `handshake failed` or `session armed` lines.
 - Nothing appears on a Wayland session: build with `capture-wayland`, accept the compositor's share dialog, and see [docs/testing.md](docs/testing.md).
 
 ## Documentation and license

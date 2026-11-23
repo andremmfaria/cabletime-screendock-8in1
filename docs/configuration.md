@@ -41,12 +41,13 @@ The command line option `--config PATH` bypasses this order and loads that file 
 screendockd [--config PATH] <command>
 
 discover
-replay  [--mi01 PATH] [--width N] [--h264-file PATH] [--iterations N]
-isolate --mode heartbeat|video|both [--mi00 PATH] [--mi01 PATH] [--width N]
+replay  [--mi00 PATH] [--mi01 PATH] [--width N] [--height N] [--h264-file PATH] [--iterations N]
+        [--no-handshake]
+isolate --mode heartbeat|video|both [--mi00 PATH] [--mi01 PATH] [--width N] [--height N] [--no-handshake]
         [--h264-file PATH] [--duration-secs N] [--fps N]
 capture [--frames N] [--out-dir DIR] [--backend auto|x11|wayland]
 run     [--mi00 PATH] [--mi01 PATH] [--h264-file PATH] [--backend auto|x11|wayland]
-        [--max-frames N]
+        [--max-frames N] [--no-handshake]
 bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
 ```
 
@@ -55,6 +56,7 @@ bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
 | `--mi00`, `--mi01` | discovered | Use this path instead of sysfs discovery for that node. A regular file works for dry runs |
 | `--width` | `display.width` | Picture width in pixels for the video header |
 | `--height` | `display.height` | Picture height in pixels for the video header |
+| `--no-handshake` | off | `run`, `replay` and `isolate`: skip the dock session handshake and the MI_00 reader, send only heartbeats and send video immediately. For regular files standing in for the nodes; a real dock discards video until the handshake has run |
 | `--h264-file` | synthetic messages for `replay` and `isolate`; libx264 for `run` and `bench` | Annex-B H.264 file to send instead of filler messages (`replay`, `isolate`), or to replay through the test encoder instead of libx264 (`run`, `bench`) |
 | `--iterations` | 20 | Times `replay` repeats its message set |
 | `--mode` | required | `isolate` condition |
@@ -65,7 +67,7 @@ bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
 | `--backend` | `capture.backend` | Capture backend for this run |
 | `--max-frames` | unlimited | `run` stops after this many frames |
 
-Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). `bench` takes `--duration-secs` like `isolate`.
+Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `replay` opens MI_00 as well, to run the handshake, unless `--no-handshake` is given. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). `bench` takes `--duration-secs` like `isolate`.
 
 ## Permissions
 

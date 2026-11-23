@@ -7,6 +7,8 @@ Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation
 ## Verified on a real dock
 
 - Report layout: every continuation report of a multi-report message carries a full 16-byte header (Report ID, then 15 zero bytes) followed by up to 4080 payload bytes. A looped H.264 test stream sent with this layout, with the picture width and height in header bytes 8 to 11 and 12 to 15, rendered a picture on the panel. This was confirmed with a Python prototype that writes the same byte layout as `framing.rs`; the Rust build has not been run against the dock.
+- Session handshake: after a fresh replug the full handshake worked with the replies this driver expects: the `app-launched` result `{res-width,res-height}`, the `notify-projection-started` result `isAllowed`, and an EDID passthrough (id 101) from the dock about every 5 seconds until answered. The Python prototype did this; the Rust session has not been run against the dock.
+- A dock that already holds a projection session from an earlier host process (heartbeat gap under about 5 seconds, or none) sends no `notify-app-accessories-are-ready` and does not answer `app-launched` or `notify-projection-started`, yet renders video with only heartbeats and correctly framed video. The session handles this with bounded waits and the `AssumedActive` state.
 - Known open item: tearing is visible on fast motion and is being examined.
 
 ## Preparation
@@ -73,14 +75,14 @@ screendockd isolate --mode video --h264-file test.h264 --duration-secs 30
 screendockd isolate --mode both --h264-file test.h264 --duration-secs 30
 ```
 
-Condition (a), heartbeat only, sends one JSON-RPC heartbeat per `daemon.heartbeat_interval_ms` on MI_00 and nothing on MI_01. Condition (b), video only, sends the looped stream on MI_01 and nothing on MI_00. Condition (c) runs both at once.
+Condition (a), heartbeat only, runs the dock session on MI_00 (heartbeat, reader and handshake) and nothing on MI_01. Condition (b), video only, sends the looped stream on MI_01 and nothing on MI_00; with no handshake a dock that has not been handshaken discards it. Condition (c) runs the session and then the video. Pass `--no-handshake` to get the bare heartbeat loop and ungated video of the earlier procedure.
 
 For each condition record, with approximate timestamps relative to the start:
 
 - Panel state before starting (idle, overlay text, previous image).
 - Panel state during the run: picture, overlay shown or not, blank, flicker.
 - Panel state at the end of the run and 10 seconds after the process exits (does it return to the overlay when the heartbeat stops, does the last frame persist).
-- The tool's report: heartbeat ticks sent, video messages sent, late frames, per-chunk latency line.
+- The tool's report: session counters (heartbeats sent, dock heartbeats seen, handshakes, losses) or heartbeat ticks sent, video messages sent, late frames, per-chunk latency line.
 - Any error text from the tool and any `dmesg` lines.
 
 The result to derive from the three records: whether video renders without the heartbeat (b), whether the heartbeat alone changes the panel (a), and whether (c) differs from (b) beyond the overlay.
@@ -141,9 +143,9 @@ The same commands run against regular files, which checks the tooling itself and
 
 ```text
 touch /tmp/mi00 /tmp/mi01
-screendockd replay --mi01 /tmp/mi01 --iterations 5
-screendockd isolate --mode both --mi00 /tmp/mi00 --mi01 /tmp/mi01 --duration-secs 3
-screendockd run --mi00 /tmp/mi00 --mi01 /tmp/mi01 --h264-file test.h264 --max-frames 50
+screendockd replay --mi00 /tmp/mi00 --mi01 /tmp/mi01 --iterations 5 --no-handshake
+screendockd isolate --mode both --mi00 /tmp/mi00 --mi01 /tmp/mi01 --duration-secs 3 --no-handshake
+screendockd run --mi00 /tmp/mi00 --mi01 /tmp/mi01 --h264-file test.h264 --max-frames 50 --no-handshake
 ```
 
-The tools print a note when a node is not a character device. Timings from such runs are not hardware timings.
+Regular files cannot hold the dock's side of the handshake, so dry runs need `--no-handshake`. The tools print a note when a node is not a character device. Timings from such runs are not hardware timings.

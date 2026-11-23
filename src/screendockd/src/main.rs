@@ -32,11 +32,12 @@ use screendockd::display::DisplayGeometry;
 use screendockd::encode::{create_encoder, EncoderKind, EncoderSettings};
 use screendockd::framing::PictureSize;
 use screendockd::hidraw_io::HidrawHandle;
+use screendockd::session::{Session, SessionSettings};
 use screendockd::utils::config::{self, CaptureBackendChoice, Config};
 use screendockd::utils::logging::init_logging;
 use screendockd::validation::{
-    run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, IsolateMode,
-    IsolateParams,
+    run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, wait_until_armed,
+    IsolateMode, IsolateParams,
 };
 
 /// Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W).
@@ -97,6 +98,17 @@ struct RunArgs {
     /// Stop after this many frames (dry runs and tests). Default: run until SIGINT/SIGTERM.
     #[arg(long)]
     max_frames: Option<u64>,
+    #[command(flatten)]
+    handshake: HandshakeArgs,
+}
+
+#[derive(Debug, Args)]
+struct HandshakeArgs {
+    /// Skip the dock session handshake and the MI_00 reader; only heartbeat and send video
+    /// immediately. For regular files standing in for the nodes. A real dock discards video
+    /// until the handshake has run.
+    #[arg(long)]
+    no_handshake: bool,
 }
 
 #[derive(Debug, Args)]
@@ -176,6 +188,8 @@ struct ReplayArgs {
     /// How many times to replay the message set.
     #[arg(long, default_value_t = 20)]
     iterations: usize,
+    #[command(flatten)]
+    handshake: HandshakeArgs,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -210,6 +224,8 @@ struct IsolateArgs {
     /// Video frame rate.
     #[arg(long, default_value_t = 25)]
     fps: u32,
+    #[command(flatten)]
+    handshake: HandshakeArgs,
 }
 
 fn load_config(path: Option<&PathBuf>) -> Result<Config> {
@@ -291,6 +307,22 @@ fn device_ids(config: &Config) -> Result<DeviceIds> {
     DeviceIds::from_config(&config.device).context("invalid [device] settings")
 }
 
+/// Longest wait for the session to arm in `replay`, covering the ready wait, both replies and
+/// the settle delay with margin.
+const REPLAY_ARM_LIMIT: Duration = Duration::from_secs(30);
+
+fn session_settings(config: &Config, size: PictureSize, args: &HandshakeArgs) -> SessionSettings {
+    let settings = SessionSettings::new(
+        size,
+        Duration::from_millis(config.daemon.heartbeat_interval_ms),
+    );
+    if args.no_handshake {
+        settings.without_handshake()
+    } else {
+        settings
+    }
+}
+
 /// Flag set by SIGINT and SIGTERM.
 fn shutdown_flag() -> Result<Arc<AtomicBool>> {
     let flag = Arc::new(AtomicBool::new(false));
@@ -315,21 +347,39 @@ fn main() -> Result<()> {
             println!("MI_01 (video):    {}", paths.mi01.display());
         }
         Command::Replay(args) => {
-            let (_, mi01) = resolve_nodes(&device_ids(&config)?, &args.nodes, false, true)?;
+            let handshake = !args.handshake.no_handshake;
+            let (mi00, mi01) = resolve_nodes(&device_ids(&config)?, &args.nodes, handshake, true)?;
             let mi01 = mi01.expect("MI_01 was requested");
             let messages = load_messages(&args.stream)?;
             warn_if_not_char_device(&mi01);
             let mut handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
             let size = size_for(&args.stream, &config)?;
+            let session = match mi00 {
+                Some(mi00) => {
+                    warn_if_not_char_device(&mi00);
+                    let mi00_handle =
+                        HidrawHandle::open_mi00(&mi00).context("failed to open MI_00")?;
+                    let settings = session_settings(&config, size, &args.handshake);
+                    let session =
+                        Session::start(mi00_handle, settings).context("session failed to start")?;
+                    println!("waiting for the dock session handshake");
+                    wait_until_armed(&session.handle(), REPLAY_ARM_LIMIT)
+                        .context("handshake did not complete")?;
+                    Some(session)
+                }
+                None => None,
+            };
             println!(
                 "replaying {} message(s) x {} iteration(s) to {}",
                 messages.len(),
                 args.iterations,
                 mi01.display()
             );
-            let report = run_replay(&mut handle, size, &messages, args.iterations)
-                .context("replay failed")?;
-            println!("{report}");
+            let result = run_replay(&mut handle, size, &messages, args.iterations);
+            if let Some(session) = session {
+                session.shutdown().context("session shutdown failed")?;
+            }
+            println!("{}", result.context("replay failed")?);
         }
         Command::Isolate(args) => {
             let mode = IsolateMode::from(args.mode);
@@ -365,11 +415,17 @@ fn main() -> Result<()> {
                 .map(HidrawHandle::open_mi01)
                 .transpose()
                 .context("failed to open MI_01")?;
+            let size = size_for(&args.stream, &config)?;
+            if mode == IsolateMode::Video {
+                println!("note: video-only runs have no MI_00 session, so a dock that has not been handshaken discards the video");
+            }
             let params = IsolateParams {
                 mode,
                 duration: Duration::from_secs(args.duration_secs),
                 heartbeat_interval: Duration::from_millis(config.daemon.heartbeat_interval_ms),
-                size: size_for(&args.stream, &config)?,
+                size,
+                session: (!args.handshake.no_handshake)
+                    .then(|| session_settings(&config, size, &args.handshake)),
                 fps: args.fps,
                 gop,
             };
@@ -435,7 +491,7 @@ fn main() -> Result<()> {
             );
             let params = DaemonParams {
                 geometry,
-                heartbeat_interval: Duration::from_millis(config.daemon.heartbeat_interval_ms),
+                session: session_settings(&config, geometry.size(), &args.handshake),
                 max_frames: args.max_frames,
                 max_consecutive_errors: DEFAULT_MAX_CONSECUTIVE_ERRORS,
             };
