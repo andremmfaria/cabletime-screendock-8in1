@@ -17,7 +17,7 @@ All content below was treated as untrusted external data (facts extracted only; 
 - https://www.techpowerup.com/351430/cabletime-launches-the-screendock-5-5-inch-720p-portable-display-and-docking-station - TechPowerUp news post; confirmed via search snippets (direct fetch blocked both as /forums/threads/... and /351430/... URL forms). Comment count (10) noted but individual comment content not retrievable.
 
 ## Crowdfunding record
-- https://www.kickstarter.com/projects/cabletimetech/cabletime-screendock-built-in-screen-more-than-just-ports - Original campaign page; confirmed via search snippets (reward tiers $109/$119/$189/$259, "820 backers pledged $128,160," funding period Aug 6-Sep 20 2026, Oct 2026 estimated delivery). Direct page fetch was blocked by the extraction tool; all figures are corroborated by the PledgeBox mirror below and by New Atlas.
+- https://www.kickstarter.com/projects/cabletimetech/cabletime-screendock-built-in-screen-more-than-just-ports - Original campaign page; confirmed via search snippets (reward tiers $109/$119/$189/$259, "820 backers pledged $128,160,"). Direct page fetch was blocked by the extraction tool; all figures are corroborated by the PledgeBox mirror below and by New Atlas.
 - https://www.pledgebox.com/projects/cabletime-screendock-built-in-screen-more-than-just-ports - Third-party Kickstarter-stats tracker mirroring the same campaign; corroborates backer count (820), pledge total ($128,160), 4,272% funded, $3,000 goal.
 
 ## Video (reviewer hands-on, primary-ish - actual device operation shown)
@@ -28,8 +28,8 @@ All content below was treated as untrusted external data (facts extracted only; 
 ## Checked but found NOT to exist / not applicable
 - **No Amazon.com or Amazon.ae listing** for the ScreenDock (model CB09W / SKU CT-DKS9-PW) was found. Searches surfaced only an unrelated CABLETIME product (15-in-1 dock, model CB14G, ASIN B0CKL87Z7N) - explicitly excluded from this research as a different product.
 - **No standalone PDF datasheet or printed manual** was located. CABLETIME substitutes an HTML "knowledge base" user-guide article (linked above) in place of a manual PDF.
-- **No Reddit thread or independent user-complaint forum post** specific to this product was found - the product is too recently released (general retail availability only since ~Oct/Nov 2026) for an organized user-feedback trail to exist yet.
+- **No Reddit thread or independent user-complaint forum post** specific to this product was found - the product is too recently released for an organized user-feedback trail to exist yet.
 - Exact physical dimensions and weight: not published by CABLETIME and not measured/reported by any reviewer found.
 
-## Note on research recency
-The product launched via Kickstarter in August 2026 and only reached general retail (cabletimetech.com direct store) in approximately October-November 2026. This research was conducted 2026-11-15. All figures reflect the state of CABLETIME's official site and available coverage as of that date; prices, stock, and especially community feedback should be expected to change/expand as the product matures.
+## Note on recency
+Figures reflect CABLETIME's official site and the coverage listed above. Prices, stock and community feedback change over time.
