@@ -147,14 +147,58 @@ pub enum DiscoveryError {
     HidrawClassDirUnreadable { path: PathBuf, source: io::Error },
     /// Walked every hidraw entry and found neither interface 0 nor interface 1 on a device
     /// matching the dock's VID/PID.
-    #[error("no hidraw device matching VID {VENDOR_ID_HEX}:PID {PRODUCT_ID_HEX} found")]
+    #[error("no hidraw device matching the configured VID:PID found")]
     NoDockInterfacesFound,
+    /// A configured vendor or product ID is not four hex digits.
+    #[error("device.{field} {value:?} is not a four digit hex number")]
+    InvalidDeviceId { field: &'static str, value: String },
     /// Found MI_01 (interface 1) on a matching device, but not MI_00 (interface 0).
     #[error("found the dock's MI_01 (video) but not its MI_00 (control/heartbeat) interface")]
     Mi00NotFound,
     /// Found MI_00 (interface 0) on a matching device, but not MI_01 (interface 1).
     #[error("found the dock's MI_00 (control/heartbeat) but not its MI_01 (video) interface")]
     Mi01NotFound,
+}
+
+/// USB vendor and product ID to match, as lowercase four digit hex strings. Defaults to the
+/// dock's real IDs; the `[device]` config section can override them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceIds {
+    vendor: String,
+    product: String,
+}
+
+impl Default for DeviceIds {
+    fn default() -> Self {
+        Self {
+            vendor: VENDOR_ID_HEX.to_string(),
+            product: PRODUCT_ID_HEX.to_string(),
+        }
+    }
+}
+
+fn normalize_id(field: &'static str, value: &str) -> Result<String, DiscoveryError> {
+    let trimmed = value.trim().trim_start_matches("0x").to_ascii_lowercase();
+    if trimmed.len() == 4 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(trimmed)
+    } else {
+        Err(DiscoveryError::InvalidDeviceId {
+            field,
+            value: value.to_string(),
+        })
+    }
+}
+
+impl DeviceIds {
+    /// Validates and normalizes the `[device]` config section.
+    pub fn from_config(
+        device: &crate::utils::config::DeviceConfig,
+    ) -> Result<Self, DiscoveryError> {
+        Ok(Self {
+            vendor: normalize_id("vendor_id_hex", &device.vendor_id_hex)?,
+            product: normalize_id("product_id_hex", &device.product_id_hex)?,
+        })
+    }
 }
 
 /// Reads a sysfs attribute file and returns its trimmed contents, or `None` on any I/O/parse
@@ -174,6 +218,15 @@ fn read_trimmed(path: &Path) -> Option<String> {
 pub fn discover_dock_hidraw(
     sysfs_hidraw_base: &Path,
     dev_dir: &Path,
+) -> Result<DockHidrawPaths, DiscoveryError> {
+    discover_with_ids(sysfs_hidraw_base, dev_dir, &DeviceIds::default())
+}
+
+/// Like [`discover_dock_hidraw`], matching the given vendor/product IDs instead of the dock's.
+pub fn discover_with_ids(
+    sysfs_hidraw_base: &Path,
+    dev_dir: &Path,
+    ids: &DeviceIds,
 ) -> Result<DockHidrawPaths, DiscoveryError> {
     let entries = fs::read_dir(sysfs_hidraw_base).map_err(|source| {
         DiscoveryError::HidrawClassDirUnreadable {
@@ -226,7 +279,7 @@ pub fn discover_dock_hidraw(
             None => continue,
         };
 
-        if vendor_id != VENDOR_ID_HEX || product_id != PRODUCT_ID_HEX {
+        if vendor_id != ids.vendor || product_id != ids.product {
             // A real device on this interface number, just not this one — e.g. an unrelated
             // vendor-HID device on the system. Cross-checking VID/PID here is exactly what
             // prevents that from being mismatched onto MI_00/MI_01.
@@ -260,6 +313,15 @@ pub fn discover() -> Result<DockHidrawPaths, DiscoveryError> {
     discover_dock_hidraw(
         Path::new(DEFAULT_SYSFS_HIDRAW_BASE),
         Path::new(DEFAULT_DEV_DIR),
+    )
+}
+
+/// [`discover`] with the vendor/product IDs from the `[device]` config section.
+pub fn discover_configured(ids: &DeviceIds) -> Result<DockHidrawPaths, DiscoveryError> {
+    discover_with_ids(
+        Path::new(DEFAULT_SYSFS_HIDRAW_BASE),
+        Path::new(DEFAULT_DEV_DIR),
+        ids,
     )
 }
 
@@ -385,5 +447,37 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&base);
+    }
+    #[test]
+    fn id_override_selects_a_different_device() {
+        let base = build_test_tree("id_override");
+        let sysfs_hidraw_base = base.join("class/hidraw");
+        let dev_dir = base.join("dev");
+        let ids = DeviceIds::from_config(&crate::utils::config::DeviceConfig {
+            vendor_id_hex: "046D".into(),
+            product_id_hex: "0xc52b".into(),
+        })
+        .unwrap();
+
+        // The unrelated device only has interface 0, so matching it must report a missing MI_01
+        // instead of resolving the dock.
+        let err = discover_with_ids(&sysfs_hidraw_base, &dev_dir, &ids).unwrap_err();
+        assert!(matches!(err, DiscoveryError::Mi01NotFound));
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn rejects_malformed_device_ids() {
+        for bad in ["", "1de", "1de1f", "zzzz"] {
+            let result = DeviceIds::from_config(&crate::utils::config::DeviceConfig {
+                vendor_id_hex: bad.into(),
+                product_id_hex: "f201".into(),
+            });
+            assert!(
+                matches!(result, Err(DiscoveryError::InvalidDeviceId { .. })),
+                "{bad:?}"
+            );
+        }
     }
 }

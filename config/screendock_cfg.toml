@@ -13,7 +13,9 @@
 # grow into as later milestones (capture/encode/heartbeat) are implemented.
 
 [display]
-# Target capture/output resolution in pixels. Defaults to the dock's native panel size.
+# Encoded picture size in pixels. Defaults to the dock's native panel size. Both must be even,
+# between 16 and 4096, and agree with the orientation (landscape: width >= height, portrait:
+# height >= width). Header field B is width * 256.
 width = 1280
 height = 720
 # One of "landscape" or "portrait".
@@ -27,6 +29,12 @@ backend = "auto"
 # x11_display = ":0"
 # Capture frame rate. 0 captures as fast as the backend allows.
 fps = 25
+
+[encode]
+# Target H.264 bit rate in kilobits per second.
+bitrate_kbps = 4000
+# Frames between keyframes (about two seconds at 25 fps).
+keyframe_interval = 50
 
 [daemon]
 # Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via

@@ -46,6 +46,13 @@ fn start_code_offsets(data: &[u8]) -> Vec<usize> {
     offsets
 }
 
+/// Returns true when `message` contains an IDR slice NAL unit (a keyframe).
+pub fn contains_idr(message: &[u8]) -> bool {
+    split_nals(message)
+        .map(|nals| nals.iter().any(|n| nal_type(n) == Some(NAL_SLICE_IDR)))
+        .unwrap_or(false)
+}
+
 /// Splits an Annex-B stream into NAL units, each slice starting at its start code.
 pub fn split_nals(data: &[u8]) -> Result<Vec<&[u8]>, AnnexBError> {
     let offsets = start_code_offsets(data);

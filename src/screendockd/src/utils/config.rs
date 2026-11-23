@@ -121,6 +121,25 @@ impl Default for CaptureConfig {
     }
 }
 
+/// H.264 encoder settings. Every field is optional in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct EncodeConfig {
+    /// Target bit rate in kilobits per second.
+    pub bitrate_kbps: u32,
+    /// Frames between keyframes.
+    pub keyframe_interval: u32,
+}
+
+impl Default for EncodeConfig {
+    fn default() -> Self {
+        Self {
+            bitrate_kbps: 4000,
+            keyframe_interval: 50,
+        }
+    }
+}
+
 /// Daemon-level runtime settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DaemonConfig {
@@ -147,6 +166,8 @@ pub struct Config {
     pub display: DisplayConfig,
     #[serde(default)]
     pub capture: CaptureConfig,
+    #[serde(default)]
+    pub encode: EncodeConfig,
     pub daemon: DaemonConfig,
     pub device: DeviceConfig,
 }
@@ -258,6 +279,7 @@ mod tests {
         assert_eq!(config.display.orientation, "landscape");
         assert_eq!(config.capture.backend, CaptureBackendChoice::Auto);
         assert_eq!(config.capture.x11_display, None);
+        assert_eq!(config.encode, EncodeConfig::default());
         assert_eq!(config.capture.fps, 25);
         assert_eq!(config.daemon.log_level, "info");
         assert_eq!(config.daemon.heartbeat_interval_ms, 1000);

@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "0.2.2"
+version = "0.5.0"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -63,10 +63,18 @@ png = "0.17"
 ashpd = { version = "0.14", optional = true, default-features = false, features = ["screencast", "tokio"] }
 pipewire = { version = "0.10", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "macros"] }
+# H.264 encoding (feature `encode-ffmpeg`): libx264 through libavcodec. Needs libavcodec,
+# libavformat, libavutil, libswscale and libavdevice development files plus clang at build time.
+ffmpeg-next = { version = "9.1", optional = true }
+# `run` subcommand: SIGINT/SIGTERM set the shutdown flag.
+signal-hook = "0.4"
+# `bench` subcommand: process CPU time through getrusage.
+libc = "0.2"
 
 [features]
 default = []
 capture-wayland = ["dep:ashpd", "dep:pipewire", "dep:tokio"]
+encode-ffmpeg = ["dep:ffmpeg-next"]
 
 [dev-dependencies]
 tempfile = "3"
@@ -96,6 +104,10 @@ assets = [
     # Design Patterns section for the full resolution order.
     ["../../config/screendock_cfg.toml", "etc/screendockd/screendock_cfg.toml", "644"],
 ]
+# Runtime library dependencies are derived from the release binary (it links libavcodec and
+# friends when built with the encode-ffmpeg feature); the libx264 encoder arrives through
+# libavcodec's own dependencies.
+depends = "$auto"
 
 # Packaging metadata for `cargo-generate-rpm` (CI builds this via `cargo generate-rpm`).
 # Paths/rationale mirror the [package.metadata.deb] section above.
@@ -109,3 +121,8 @@ assets = [
     # template rather than relying solely on a per-user XDG config.
     { source = "../../config/screendock_cfg.toml", dest = "/etc/screendockd/screendock_cfg.toml", mode = "644" },
 ]
+
+# The binary links libavcodec/libavformat/libavutil/libswscale (encode-ffmpeg feature);
+# ffmpeg-libs provides them with libx264 support on Fedora-family systems (RPM Fusion).
+[package.metadata.generate-rpm.requires]
+ffmpeg-libs = "*"

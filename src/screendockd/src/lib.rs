@@ -7,8 +7,11 @@
 //! encode is still a typed stub.
 
 pub mod annexb;
+pub mod bench;
 pub mod capture;
+pub mod daemon;
 pub mod discovery;
+pub mod display;
 pub mod encode;
 pub mod framing;
 pub mod heartbeat;

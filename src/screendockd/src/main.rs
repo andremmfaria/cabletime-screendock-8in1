@@ -5,23 +5,31 @@
 //! - `replay`: Milestone 2 write-timing test against MI_01.
 //! - `isolate`: Milestone 3 heartbeat/video/both isolation test.
 //! - `capture`: grab N frames from the desktop and write them as PNG files.
+//! - `run`: the daemon, heartbeat plus capture, encode and write to the dock.
+//! - `bench`: capture plus encode CPU measurement, no dock needed.
 //!
-//! The capture/encode daemon is not wired yet. `docs/hardware-validation.md` describes how the
-//! `replay` and `isolate` subcommands are used on the dock.
+//! `docs/hardware-validation.md` describes how `replay`, `isolate` and `run` are used on the
+//! dock; `docs/daemon.md` describes the daemon itself.
 //!
 //! Per the Design Patterns section of `docs/implementation-plan.md` (pattern 7), this is the
 //! application boundary: it uses `anyhow` with context, while the library modules return typed
 //! errors. Any failure here exits nonzero.
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use screendockd::annexb::messages_from_annexb;
+use screendockd::bench::run_bench;
 use screendockd::capture::{create_backend, detect_session};
-use screendockd::discovery::{discover, Mi00Path, Mi01Path};
+use screendockd::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
+use screendockd::discovery::{discover_configured, DeviceIds, Mi00Path, Mi01Path};
+use screendockd::display::DisplayGeometry;
+use screendockd::encode::{create_encoder, EncoderKind, EncoderSettings};
 use screendockd::framing::PixelWidth;
 use screendockd::hidraw_io::HidrawHandle;
 use screendockd::utils::config::{self, CaptureBackendChoice, Config};
@@ -54,6 +62,53 @@ enum Command {
     Isolate(IsolateArgs),
     /// Milestone 4: capture frames from the desktop and write them as PNG files.
     Capture(CaptureArgs),
+    /// Run the daemon: heartbeat on MI_00, capture, encode and write video to MI_01.
+    Run(RunArgs),
+    /// Measure CPU time of capture plus encode over a fixed duration (no dock needed).
+    Bench(BenchArgs),
+}
+
+#[derive(Debug, Args)]
+struct EncoderArgs {
+    /// Annex-B H.264 file to replay instead of encoding with libx264 (test encoder; needs no
+    /// libav). Without it the ffmpeg encoder is used, which needs the encode-ffmpeg feature.
+    #[arg(long, value_name = "PATH")]
+    h264_file: Option<PathBuf>,
+}
+
+impl EncoderArgs {
+    fn kind(&self) -> EncoderKind {
+        match &self.h264_file {
+            Some(path) => EncoderKind::Prerecorded(path.clone()),
+            None => EncoderKind::Ffmpeg,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct RunArgs {
+    #[command(flatten)]
+    nodes: NodeArgs,
+    #[command(flatten)]
+    encoder: EncoderArgs,
+    /// Capture backend, overriding the configured `capture.backend`.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
+    /// Stop after this many frames (dry runs and tests). Default: run until SIGINT/SIGTERM.
+    #[arg(long)]
+    max_frames: Option<u64>,
+}
+
+#[derive(Debug, Args)]
+struct BenchArgs {
+    #[command(flatten)]
+    encoder: EncoderArgs,
+    /// Capture backend, overriding the configured `capture.backend`.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
+    /// Measurement duration in seconds.
+    #[arg(long, default_value_t = 30)]
+    duration_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -165,13 +220,14 @@ fn load_config(path: Option<&PathBuf>) -> Result<Config> {
 /// Resolves the node paths a command needs: explicit overrides win, discovery fills in the rest.
 /// Discovery is only run when a needed node was not given.
 fn resolve_nodes(
+    ids: &DeviceIds,
     nodes: &NodeArgs,
     need_mi00: bool,
     need_mi01: bool,
 ) -> Result<(Option<Mi00Path>, Option<Mi01Path>)> {
     let missing = (need_mi00 && nodes.mi00.is_none()) || (need_mi01 && nodes.mi01.is_none());
     let discovered = if missing {
-        Some(discover().context("failed to resolve dock hidraw nodes")?)
+        Some(discover_configured(ids).context("failed to resolve dock hidraw nodes")?)
     } else {
         None
     };
@@ -215,8 +271,29 @@ fn warn_if_not_char_device(path: &std::path::Path) {
     }
 }
 
-fn width_for(stream: &StreamArgs, config: &Config) -> PixelWidth {
-    PixelWidth(stream.width.unwrap_or(config.display.width))
+fn geometry(config: &Config) -> Result<DisplayGeometry> {
+    DisplayGeometry::from_config(&config.display).context("invalid [display] settings")
+}
+
+fn width_for(stream: &StreamArgs, config: &Config) -> Result<PixelWidth> {
+    match stream.width {
+        Some(width) => Ok(PixelWidth(width)),
+        None => Ok(geometry(config)?.width()),
+    }
+}
+
+fn device_ids(config: &Config) -> Result<DeviceIds> {
+    DeviceIds::from_config(&config.device).context("invalid [device] settings")
+}
+
+/// Flag set by SIGINT and SIGTERM.
+fn shutdown_flag() -> Result<Arc<AtomicBool>> {
+    let flag = Arc::new(AtomicBool::new(false));
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, Arc::clone(&flag))
+            .context("failed to install signal handler")?;
+    }
+    Ok(flag)
 }
 
 fn main() -> Result<()> {
@@ -227,17 +304,18 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Discover => {
-            let paths = discover().context("failed to resolve dock hidraw nodes")?;
+            let paths = discover_configured(&device_ids(&config)?)
+                .context("failed to resolve dock hidraw nodes")?;
             println!("MI_00 (control):  {}", paths.mi00.display());
             println!("MI_01 (video):    {}", paths.mi01.display());
         }
         Command::Replay(args) => {
-            let (_, mi01) = resolve_nodes(&args.nodes, false, true)?;
+            let (_, mi01) = resolve_nodes(&device_ids(&config)?, &args.nodes, false, true)?;
             let mi01 = mi01.expect("MI_01 was requested");
             let messages = load_messages(&args.stream)?;
             warn_if_not_char_device(&mi01);
             let mut handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
-            let width = width_for(&args.stream, &config);
+            let width = width_for(&args.stream, &config)?;
             println!(
                 "replaying {} message(s) x {} iteration(s) to {}",
                 messages.len(),
@@ -258,7 +336,8 @@ fn main() -> Result<()> {
             if args.duration_secs == 0 {
                 bail!("--duration-secs must be greater than zero");
             }
-            let (mi00, mi01) = resolve_nodes(&args.nodes, need_mi00, need_mi01)?;
+            let (mi00, mi01) =
+                resolve_nodes(&device_ids(&config)?, &args.nodes, need_mi00, need_mi01)?;
             let gop = if need_mi01 {
                 load_messages(&args.stream)?
             } else {
@@ -285,7 +364,7 @@ fn main() -> Result<()> {
                 mode,
                 duration: Duration::from_secs(args.duration_secs),
                 heartbeat_interval: Duration::from_millis(config.daemon.heartbeat_interval_ms),
-                width: width_for(&args.stream, &config),
+                width: width_for(&args.stream, &config)?,
                 fps: args.fps,
                 gop,
             };
@@ -326,6 +405,73 @@ fn main() -> Result<()> {
                     frame.format
                 );
             }
+        }
+        Command::Run(args) => {
+            let geometry = geometry(&config)?;
+            let (mi00, mi01) = resolve_nodes(&device_ids(&config)?, &args.nodes, true, true)?;
+            let mi00 = mi00.expect("MI_00 was requested");
+            let mi01 = mi01.expect("MI_01 was requested");
+            warn_if_not_char_device(&mi00);
+            warn_if_not_char_device(&mi01);
+            let mi00_handle = HidrawHandle::open_mi00(&mi00).context("failed to open MI_00")?;
+            let mi01_handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
+            let choice = args.backend.map_or(config.capture.backend, Into::into);
+            let mut capture = create_backend(&config, choice).context("failed to start capture")?;
+            let settings = EncoderSettings::from_config(&config, geometry);
+            let mut encoder = create_encoder(&args.encoder.kind(), settings)
+                .context("failed to start encoder")?;
+            let stop = shutdown_flag()?;
+            tracing::info!(
+                capture = capture.name(),
+                encoder = encoder.name(),
+                width = geometry.width().0,
+                height = geometry.height().0,
+                "starting daemon"
+            );
+            let params = DaemonParams {
+                geometry,
+                heartbeat_interval: Duration::from_millis(config.daemon.heartbeat_interval_ms),
+                max_frames: args.max_frames,
+                max_consecutive_errors: DEFAULT_MAX_CONSECUTIVE_ERRORS,
+            };
+            let report = daemon::run(
+                mi00_handle,
+                mi01_handle,
+                capture.as_mut(),
+                encoder.as_mut(),
+                &params,
+                &stop,
+            )
+            .context("daemon failed")?;
+            println!("{report:?}");
+        }
+        Command::Bench(args) => {
+            if args.duration_secs == 0 {
+                bail!("--duration-secs must be greater than zero");
+            }
+            let geometry = geometry(&config)?;
+            let choice = args.backend.map_or(config.capture.backend, Into::into);
+            let mut capture = create_backend(&config, choice).context("failed to start capture")?;
+            let settings = EncoderSettings::from_config(&config, geometry);
+            let mut encoder = create_encoder(&args.encoder.kind(), settings)
+                .context("failed to start encoder")?;
+            let stop = shutdown_flag()?;
+            println!(
+                "benchmarking {} + {} at {}x{} for {}s",
+                capture.name(),
+                encoder.name(),
+                geometry.width().0,
+                geometry.height().0,
+                args.duration_secs
+            );
+            let report = run_bench(
+                capture.as_mut(),
+                encoder.as_mut(),
+                Duration::from_secs(args.duration_secs),
+                &stop,
+            )
+            .context("benchmark failed")?;
+            println!("{report}");
         }
     }
     Ok(())
