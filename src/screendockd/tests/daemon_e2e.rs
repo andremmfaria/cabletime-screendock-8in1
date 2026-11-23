@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use common::{require_xvfb, Painter, HEIGHT, WIDTH};
 use screendockd::annexb::messages_from_annexb;
 use screendockd::framing::{
-    FieldB, ParsedMessage, ReportId, CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX,
+    ParsedMessage, PictureSize, ReportId, CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX,
     REPORT_SIZE,
 };
 use screendockd::hidraw_io::HidrawHandle;
@@ -108,7 +108,7 @@ fn run_writes_expected_video_and_heartbeats_then_exits() {
     let video = read_all(&dir.path().join("mi01"), ReportId::Video);
     assert_eq!(video.len(), 12);
     for (i, msg) in video.iter().enumerate() {
-        assert_eq!(msg.field_b, FieldB(327_680));
+        assert_eq!(msg.size, PictureSize::new(1280, 720));
         assert_eq!(msg.payload, expected[i % expected.len()], "message {i}");
     }
 

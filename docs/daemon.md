@@ -27,7 +27,7 @@ Startup is fail fast. In this order, any failure prints the error chain and exit
 ## Loops
 
 - Heartbeat thread: sends tick 2 and later on MI_00 every `daemon.heartbeat_interval_ms`, scheduled against fixed deadlines so write time does not accumulate as drift. Its tracing span is `heartbeat_loop`.
-- Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (field B from the display geometry), then one `write(2)` per chunk back to back.
+- Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (width and height from the display geometry), then one `write(2)` per chunk back to back.
 
 ## Errors after startup
 
@@ -48,15 +48,9 @@ SIGINT and SIGTERM set a shared flag. The video loop checks it every frame and t
 | Edge length | even, 16 to 4096 pixels |
 | `landscape` | width at least height |
 | `portrait` | height at least width |
-| Header field B | `width * 256` |
+| Header width and height | the configured width and height, unchanged |
 
-| Size | Orientation | Field B |
-|---|---|---|
-| 1280x720 | landscape | 327680 |
-| 900x600 | landscape | 230400 |
-| 720x1280 | portrait | 184320 |
-
-The same geometry sets the libx264 output size (the capture is scaled to it by the encoder) and the field B written into every video message header. The Wayland backend receives it as its preferred stream size. Invalid values are a startup error.
+The same geometry sets the libx264 output size (the capture is scaled to it by the encoder) and the width and height written into the header of every video message. The Wayland backend receives it as its preferred stream size. Invalid values are a startup error.
 
 ## Device section
 
@@ -64,5 +58,5 @@ The same geometry sets the libx264 output size (the capture is scaled to it by t
 
 ## Tests
 
-- Unit tests in `daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and field B, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles.
+- Unit tests in `daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and header size, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles.
 - `tests/daemon_e2e.rs` runs the real binary against Xvfb with the prerecorded encoder and files for the nodes: it checks the video messages byte for byte against the source stream, the heartbeat, a clean exit on SIGTERM and on SIGINT, and a nonzero exit with no video written when a node cannot be opened.

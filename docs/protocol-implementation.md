@@ -2,28 +2,28 @@
 
 This page describes how the wire protocol from the protocol specification under `research/` is implemented. The research document is the source for the wire facts.
 
-## Chunk layout
+## Report layout
 
-Every chunk written to the device is exactly 4096 bytes (`REPORT_SIZE`), zero padded at the tail.
+Every report written to the device is exactly 4096 bytes (`REPORT_SIZE`), zero padded at the tail. Every report starts with a 16-byte header, the first report of a message and every continuation report alike.
 
-First chunk of a message:
+First report of a message:
 
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 1 | Report ID (1 for MI_00 control, 2 for MI_01 video) |
-| 1 to 4 | 4 | Total payload length, big-endian u32 |
-| 5 to 8 | 4 | Field A, big-endian u32, always 0 |
-| 9 to 12 | 4 | Field B, big-endian u32: 0 for control, target width in pixels times 256 for video |
-| 13 to 15 | 3 | Zero padding |
-| 16 onward | up to 4080 | Payload |
+| 1 to 4 | 4 | Total payload length of the whole message, big-endian u32 |
+| 5 to 7 | 3 | Zero |
+| 8 to 11 | 4 | Picture width in pixels, big-endian u32 (video; zero for control messages) |
+| 12 to 15 | 4 | Picture height in pixels, big-endian u32 (video; zero for control messages) |
+| 16 onward | up to 4080 | Payload (Annex B H.264 or JSON text) |
 
-Continuation chunk: 1 byte Report ID followed by up to 4095 payload bytes.
+Continuation report: byte 0 is the Report ID, bytes 1 to 15 are zero, and up to 4080 payload bytes start at offset 16.
 
-A 3577 byte keyframe bundle fits one chunk. A 67,666 byte inter-frame takes 17 chunks.
+A 3577 byte keyframe bundle fits one report. A 67,666 byte inter-frame takes 17 reports: the first carries 4080 payload bytes, fifteen continuations carry 4080 each and the last carries 2386.
 
 ## Building messages
 
-`MessageBuilder::video(PixelWidth)` and `MessageBuilder::control()` fill in the Report ID, field A (always 0) and field B. `.payload(&[u8]).build()` returns the chunk list. `frame_message` is the underlying pure function and `parse_chunks` is its inverse. Header parsing rejects non-zero padding and unknown Report IDs.
+`MessageBuilder::video(PictureSize)` and `MessageBuilder::control()` fill in the Report ID, width and height (zero for control). `.payload(&[u8]).build()` returns the report list. `frame_message` is the underlying pure function and `parse_chunks` is its inverse. `PixelWidth`, `PixelHeight` and `PictureSize` are newtypes so a width cannot be passed as a height. Parsing rejects non-zero bytes 5 to 7 in a first header, a continuation whose bytes 1 to 15 are not zero, and unknown Report IDs.
 
 ## Writing: `HidrawHandle::write_chunks`
 

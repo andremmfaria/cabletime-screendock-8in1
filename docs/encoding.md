@@ -50,7 +50,7 @@ Verification: `tests/encode_ffmpeg.rs` encodes a 30 frame synthetic sequence fro
 
 ## Resolution
 
-`display::DisplayGeometry` validates `display.width`, `display.height` and `display.orientation` and exposes the encode size and header field B. See [daemon.md](daemon.md#resolution).
+`display::DisplayGeometry` validates `display.width`, `display.height` and `display.orientation` and exposes the encode size and the header width and height. See [daemon.md](daemon.md#resolution).
 
 ## CPU measurement
 

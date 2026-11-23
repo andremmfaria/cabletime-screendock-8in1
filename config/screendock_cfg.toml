@@ -15,7 +15,7 @@
 [display]
 # Encoded picture size in pixels. Defaults to the dock's native panel size. Both must be even,
 # between 16 and 4096, and agree with the orientation (landscape: width >= height, portrait:
-# height >= width). Header field B is width * 256.
+# height >= width). The video header carries this width and height.
 width = 1280
 height = 720
 # One of "landscape" or "portrait".
