@@ -3,8 +3,8 @@ name: Tag Release
 # Fires on every push to main. The job below reads the crate's SemVer version out of
 # Cargo.toml and makes sure a `v<version>` tag exists pointing at the new tip — moving it
 # forward if the version string hasn't changed since the tag was last set, or creating a
-# brand-new tag if the version itself changed. Pushing the moved tag is what triggers
-# package.yml (it listens for `v*` tag pushes).
+# brand-new tag if the version itself changed. The `package` job then calls package.yml
+# directly, because a tag pushed with GITHUB_TOKEN does not trigger other workflows.
 on:
   push:
     branches: [main]
@@ -54,3 +54,9 @@ jobs:
           # Force-push only this one tag ref, not --tags (which would force-push every tag in the
           # repo and risk clobbering unrelated tags this workflow doesn't own).
           git push origin "refs/tags/$TAG" --force
+
+  package:
+    needs: tag
+    uses: ./.github/workflows/package.yml
+    permissions:
+      contents: write

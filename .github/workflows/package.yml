@@ -1,8 +1,11 @@
 name: Package
 
-# Fires automatically whenever tag-release.yml moves/creates a v* tag (push of a tag matching
-# v*), and can also be run manually for a one-off build/inspection without needing a tag event.
+# tag-release.yml calls this workflow directly (workflow_call) after it moves or creates the
+# v<version> tag. Tags pushed with GITHUB_TOKEN never trigger other workflows, so a plain
+# `push: tags` trigger alone would never fire for those tags. The tag push trigger stays for
+# tags pushed by a person, and workflow_dispatch allows a manual run.
 on:
+  workflow_call: {}
   push:
     tags: ["v*"]
   workflow_dispatch: {}
@@ -23,6 +26,9 @@ jobs:
 
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
@@ -73,10 +79,21 @@ jobs:
       # instead of erroring on "release already exists"; if the tag is new, it creates the
       # release. Either way all three built files end up as downloadable release assets, not
       # just workflow-run build artifacts.
+      - name: Read crate version
+        id: version
+        run: echo "tag=v$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[0].version')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packages as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: src/screendockd/dist/*
+          if-no-files-found: error
+
       - name: Create or update GitHub Release with built assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.tag }}
           files: src/screendockd/dist/*
           fail_on_unmatched_files: true
         env:
