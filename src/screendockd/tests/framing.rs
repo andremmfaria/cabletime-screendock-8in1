@@ -23,13 +23,13 @@ use screendockd::framing::{
 fn nal(nal_type: u8, nal_ref_idc: u8, body_len: usize) -> Vec<u8> {
     let mut v = vec![0x00, 0x00, 0x00, 0x01];
     v.push((nal_ref_idc << 5) | nal_type);
-    v.extend(std::iter::repeat(0xAAu8).take(body_len));
+    v.extend(std::iter::repeat_n(0xAAu8, body_len));
     v
 }
 
 /// A real keyframe-bundle shape per the research doc: SPS (type 7) + PPS (type 8) + SEI (type 6)
 /// + IDR slice (type 5) concatenated as one message, sized to exactly 3577 bytes total so this
-/// matches the research's documented fixture length precisely.
+///   matches the research's documented fixture length precisely.
 fn keyframe_bundle_3577_bytes() -> Vec<u8> {
     let sps = nal(7, 3, 25); // 4 + 1 + 25 = 30 bytes
     let pps = nal(8, 3, 7); // 4 + 1 + 7  = 12 bytes

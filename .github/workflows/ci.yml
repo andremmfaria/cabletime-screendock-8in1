@@ -34,6 +34,10 @@ jobs:
         with:
           workspaces: src/screendockd
 
+      # Xvfb backs the X11 capture integration tests (tests/capture_x11.rs).
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Check formatting (cargo fmt)
         run: cargo fmt --check
 
@@ -44,7 +48,7 @@ jobs:
       # workflow then blocks on, that's a signal to fix the warning, not to silently loosen this
       # check without discussion.
       - name: Lint (cargo clippy)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build (cargo build)
         run: cargo build --verbose
