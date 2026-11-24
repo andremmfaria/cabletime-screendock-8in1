@@ -6,12 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
-use screendockd::daemon::{run, DaemonParams, DaemonReport};
+use screendockd::app::daemon::{run, DaemonParams, DaemonReport};
+use screendockd::core::session::SessionSettings;
 use screendockd::fake_dock::{FakeDock, FakeDockConfig};
 use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::ports::encode::EncoderSettings;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
-use screendockd::session::SessionSettings;
 
 struct Solid;
 

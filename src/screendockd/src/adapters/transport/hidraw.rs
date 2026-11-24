@@ -13,75 +13,22 @@
 //! - (pattern 8, mechanism/policy) this module moves already-framed buffers and never
 //!   interprets header field meanings beyond checking the Report ID matches the channel the
 //!   handle was opened for.
-//! - (pattern 7, errors) `HidrawIoError` is a typed enum. Fail-fast vs recoverable is the
+//! - (pattern 7, errors) `TransportError` is a typed enum. Fail-fast vs recoverable is the
 //!   caller's decision: every failed write is returned with its chunk index so a caller can
 //!   decide whether to abort (startup, validation tools) or drop the message and continue
 //!   (steady-state loops).
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-
-use crate::discovery::{Mi00Path, Mi01Path};
+use super::discovery::{Mi00Path, Mi01Path};
+use crate::ports::transport::{DockTransport, TransportError, WriteTimings};
 use crate::protocol::framing::{
     parse_chunks, FrameHeader, FramingError, ParsedMessage, ReportId,
     CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
 };
-
-/// Errors from opening, writing to or reading from a hidraw node.
-#[derive(Debug, Error)]
-pub enum HidrawIoError {
-    /// The node couldn't be opened (missing, no permission, ...).
-    #[error("couldn't open hidraw node {path:?}: {source}")]
-    Open { path: PathBuf, source: io::Error },
-    /// A chunk was not exactly `REPORT_SIZE` bytes long.
-    #[error("chunk {index} is {len} bytes, expected exactly {REPORT_SIZE}")]
-    BadChunkSize { index: usize, len: usize },
-    /// A chunk's Report ID byte didn't match the channel this handle was opened for.
-    #[error("chunk {index} has Report ID {got}, but this handle is the {channel:?} channel")]
-    WrongChannel {
-        index: usize,
-        channel: ReportId,
-        got: u8,
-    },
-    /// `write(2)` failed on a chunk.
-    #[error("write of chunk {index} failed: {source}")]
-    Write { index: usize, source: io::Error },
-    /// `write(2)` accepted fewer bytes than the chunk holds.
-    #[error("short write on chunk {index}: {written} of {expected} bytes")]
-    ShortWrite {
-        index: usize,
-        written: usize,
-        expected: usize,
-    },
-    /// `read(2)` failed.
-    #[error("read failed: {0}")]
-    Read(io::Error),
-    /// Duplicating the descriptor failed.
-    #[error("couldn't duplicate the hidraw descriptor: {0}")]
-    Clone(io::Error),
-    /// `poll(2)` failed.
-    #[error("poll failed: {0}")]
-    Poll(io::Error),
-    /// The read side hit end-of-file (or a zero-length read) before a full message arrived.
-    #[error("end of stream while reading chunk {index}")]
-    UnexpectedEof { index: usize },
-    /// The inbound chunks didn't parse as a valid message.
-    #[error("inbound message failed to parse: {0}")]
-    Framing(#[from] FramingError),
-}
-
-/// Per-chunk write timing for one message, in write order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WriteTimings {
-    /// Duration of each individual `write(2)` call.
-    pub per_chunk: Vec<Duration>,
-    /// Wall time from just before the first write to just after the last.
-    pub total: Duration,
-}
 
 /// An open hidraw node for one of the dock's two channels.
 ///
@@ -96,21 +43,21 @@ pub struct HidrawHandle {
 
 impl HidrawHandle {
     /// Opens the resolved MI_00 node (control/heartbeat channel).
-    pub fn open_mi00(path: &Mi00Path) -> Result<Self, HidrawIoError> {
+    pub fn open_mi00(path: &Mi00Path) -> Result<Self, TransportError> {
         Self::open(path.as_path(), ReportId::Control)
     }
 
     /// Opens the resolved MI_01 node (video channel).
-    pub fn open_mi01(path: &Mi01Path) -> Result<Self, HidrawIoError> {
+    pub fn open_mi01(path: &Mi01Path) -> Result<Self, TransportError> {
         Self::open(path.as_path(), ReportId::Video)
     }
 
-    fn open(path: &Path, channel: ReportId) -> Result<Self, HidrawIoError> {
+    fn open(path: &Path, channel: ReportId) -> Result<Self, TransportError> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
-            .map_err(|source| HidrawIoError::Open {
+            .map_err(|source| TransportError::Open {
                 path: path.to_path_buf(),
                 source,
             })?;
@@ -126,8 +73,8 @@ impl HidrawHandle {
     /// Duplicates the descriptor, so a reader thread and a writer can each own a handle to the
     /// same node. Every message on the control channel is one report, so single `write(2)`
     /// calls from different handles never interleave inside a message.
-    pub fn try_clone(&self) -> Result<Self, HidrawIoError> {
-        let file = self.file.try_clone().map_err(HidrawIoError::Clone)?;
+    pub fn try_clone(&self) -> Result<Self, TransportError> {
+        let file = self.file.try_clone().map_err(TransportError::Clone)?;
         Ok(Self {
             file,
             channel: self.channel,
@@ -137,7 +84,7 @@ impl HidrawHandle {
     /// Waits up to `timeout` for the node to become readable. Returns true when a read will
     /// not block (data, end of stream or an error condition is pending), so a reader thread can
     /// notice a stop request instead of blocking in `read(2)` forever.
-    pub fn wait_readable(&self, timeout: Duration) -> Result<bool, HidrawIoError> {
+    pub fn wait_readable(&self, timeout: Duration) -> Result<bool, TransportError> {
         use std::os::fd::AsRawFd;
         let mut pfd = libc::pollfd {
             fd: self.file.as_raw_fd(),
@@ -153,14 +100,14 @@ impl HidrawHandle {
             }
             let err = io::Error::last_os_error();
             if err.kind() != io::ErrorKind::Interrupted {
-                return Err(HidrawIoError::Poll(err));
+                return Err(TransportError::Poll(err));
             }
         }
     }
 
     /// Reads one raw report (one `read(2)`) without interpreting it. End of stream is an
     /// error.
-    pub fn read_report(&mut self) -> Result<Vec<u8>, HidrawIoError> {
+    pub fn read_report(&mut self) -> Result<Vec<u8>, TransportError> {
         self.read_chunk(0)
     }
 
@@ -181,16 +128,16 @@ impl HidrawHandle {
     /// (exactly `REPORT_SIZE` bytes, Report ID matching this handle's channel) before the
     /// first byte of the message is written, so a malformed message is rejected whole rather
     /// than half-sent.
-    pub fn write_chunks(&mut self, chunks: &[Vec<u8>]) -> Result<WriteTimings, HidrawIoError> {
+    pub fn write_chunks(&mut self, chunks: &[Vec<u8>]) -> Result<WriteTimings, TransportError> {
         for (index, chunk) in chunks.iter().enumerate() {
             if chunk.len() != REPORT_SIZE {
-                return Err(HidrawIoError::BadChunkSize {
+                return Err(TransportError::BadChunkSize {
                     index,
                     len: chunk.len(),
                 });
             }
             if chunk[0] != self.channel.as_u8() {
-                return Err(HidrawIoError::WrongChannel {
+                return Err(TransportError::WrongChannel {
                     index,
                     channel: self.channel,
                     got: chunk[0],
@@ -207,10 +154,10 @@ impl HidrawHandle {
             let written = self
                 .file
                 .write(chunk)
-                .map_err(|source| HidrawIoError::Write { index, source })?;
+                .map_err(|source| TransportError::Write { index, source })?;
             per_chunk.push(start.elapsed());
             if written != chunk.len() {
-                return Err(HidrawIoError::ShortWrite {
+                return Err(TransportError::ShortWrite {
                     index,
                     written,
                     expected: chunk.len(),
@@ -224,17 +171,17 @@ impl HidrawHandle {
     }
 
     /// Reads one report (one `read(2)`), truncating to the bytes returned.
-    fn read_chunk(&mut self, index: usize) -> Result<Vec<u8>, HidrawIoError> {
+    fn read_chunk(&mut self, index: usize) -> Result<Vec<u8>, TransportError> {
         let mut buf = vec![0u8; REPORT_SIZE];
         let n = loop {
             match self.file.read(&mut buf) {
                 Ok(n) => break n,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(HidrawIoError::Read(e)),
+                Err(e) => return Err(TransportError::Read(e)),
             }
         };
         if n == 0 {
-            return Err(HidrawIoError::UnexpectedEof { index });
+            return Err(TransportError::UnexpectedEof { index });
         }
         buf.truncate(n);
         Ok(buf)
@@ -247,7 +194,7 @@ impl HidrawHandle {
     /// Blocks until a full message arrives. A report shorter than its meaningful bytes is
     /// zero-extended before parsing, since a device (or loopback) may return only the
     /// meaningful bytes of a report.
-    pub fn read_message(&mut self) -> Result<ParsedMessage, HidrawIoError> {
+    pub fn read_message(&mut self) -> Result<ParsedMessage, TransportError> {
         let mut first = self.read_chunk(0)?;
         if first.len() < HEADER_SIZE {
             return Err(FramingError::HeaderTooShort { len: first.len() }.into());
@@ -275,12 +222,39 @@ impl HidrawHandle {
     }
 }
 
+impl DockTransport for HidrawHandle {
+    fn channel(&self) -> ReportId {
+        HidrawHandle::channel(self)
+    }
+
+    fn write_chunks(&mut self, chunks: &[Vec<u8>]) -> Result<WriteTimings, TransportError> {
+        HidrawHandle::write_chunks(self, chunks)
+    }
+
+    fn read_report(&mut self) -> Result<Vec<u8>, TransportError> {
+        HidrawHandle::read_report(self)
+    }
+
+    fn read_message(&mut self) -> Result<ParsedMessage, TransportError> {
+        HidrawHandle::read_message(self)
+    }
+
+    fn wait_readable(&self, timeout: Duration) -> Result<bool, TransportError> {
+        HidrawHandle::wait_readable(self, timeout)
+    }
+
+    fn try_clone(&self) -> Result<Box<dyn DockTransport>, TransportError> {
+        Ok(Box::new(HidrawHandle::try_clone(self)?))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::framing::{frame_message, MessageBuilder, PictureSize};
     use std::io::{Seek, SeekFrom};
     use std::os::fd::OwnedFd;
+    use std::path::PathBuf;
 
     fn payload(len: usize) -> Vec<u8> {
         (0..len).map(|i| (i % 251) as u8).collect()
@@ -352,7 +326,7 @@ mod tests {
         // Corrupt the second chunk's Report ID: the first chunk must not be written either.
         chunks[1][0] = ReportId::Video.as_u8();
         let err = handle.write_chunks(&chunks).unwrap_err();
-        assert!(matches!(err, HidrawIoError::WrongChannel { index: 1, .. }));
+        assert!(matches!(err, TransportError::WrongChannel { index: 1, .. }));
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
     }
 
@@ -364,7 +338,7 @@ mod tests {
         let err = handle.write_chunks(&[vec![1u8; 10]]).unwrap_err();
         assert!(matches!(
             err,
-            HidrawIoError::BadChunkSize { index: 0, len: 10 }
+            TransportError::BadChunkSize { index: 0, len: 10 }
         ));
     }
 
@@ -380,13 +354,13 @@ mod tests {
         handle.write_chunks(&chunks[..1]).unwrap();
         handle.file_for_test().seek(SeekFrom::Start(0)).unwrap();
         let err = handle.read_message().unwrap_err();
-        assert!(matches!(err, HidrawIoError::UnexpectedEof { index: 1 }));
+        assert!(matches!(err, TransportError::UnexpectedEof { index: 1 }));
     }
 
     #[test]
     fn open_reports_missing_node() {
         let err = HidrawHandle::open_mi01(&Mi01Path::new(PathBuf::from("/nonexistent/hidraw9")))
             .unwrap_err();
-        assert!(matches!(err, HidrawIoError::Open { .. }));
+        assert!(matches!(err, TransportError::Open { .. }));
     }
 }

@@ -25,16 +25,19 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use screendockd::adapters::capture::{create_backend, detect_session};
 use screendockd::adapters::encode::{create_encoder, EncoderKind};
+use screendockd::adapters::transport::discovery::{
+    discover_configured, DeviceIds, Mi00Path, Mi01Path,
+};
+use screendockd::adapters::transport::hidraw::HidrawHandle;
+use screendockd::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use screendockd::bench::run_bench;
 use screendockd::config::{self, CaptureBackendChoice, Config};
-use screendockd::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
-use screendockd::discovery::{discover_configured, DeviceIds, Mi00Path, Mi01Path};
-use screendockd::hidraw_io::HidrawHandle;
+use screendockd::core::session::{Session, SessionSettings};
 use screendockd::ports::encode::EncoderSettings;
+use screendockd::ports::transport::DockTransport;
 use screendockd::protocol::annexb::messages_from_annexb;
 use screendockd::protocol::display::DisplayGeometry;
 use screendockd::protocol::framing::PictureSize;
-use screendockd::session::{Session, SessionSettings};
 use screendockd::telemetry::logging::init_logging;
 use screendockd::validation::{
     run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, wait_until_armed,
@@ -434,8 +437,12 @@ fn main() -> Result<()> {
                 "running {:?} for {}s (watch the panel and record what it shows)",
                 mode, args.duration_secs
             );
-            let report = run_isolate(&params, mi00_handle.as_mut(), mi01_handle.as_mut())
-                .context("isolation run failed")?;
+            let report = run_isolate(
+                &params,
+                mi00_handle.as_mut().map(|h| h as &mut dyn DockTransport),
+                mi01_handle.as_mut().map(|h| h as &mut dyn DockTransport),
+            )
+            .context("isolation run failed")?;
             println!("{report}");
         }
         Command::Capture(args) => {

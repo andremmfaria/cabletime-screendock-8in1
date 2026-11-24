@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::hidraw_io::HidrawHandle;
+use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::protocol::framing::{frame_message, PictureSize, ReportId, REPORT_SIZE};
 use crate::protocol::inbound::InboundAssembler;
 

@@ -8,7 +8,7 @@
 //! can resynchronize. Only a long unbroken run of failures ends the daemon with an error, so a
 //! supervisor restarts it instead of it spinning against a dead device.
 //!
-//! MI_00 belongs to the [`Session`](crate::session::Session): its heartbeat, reader and
+//! MI_00 belongs to the [`Session`](crate::core::session::Session): its heartbeat, reader and
 //! handshake threads run independently of the video loop. The video loop runs on the calling
 //! thread, is paced by the capture backend, and writes nothing until the session is armed. When
 //! the session is lost it pauses, and when the handshake completes again it restarts from a
@@ -20,12 +20,12 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{debug, info, info_span, warn};
 
-use crate::hidraw_io::HidrawHandle;
+use crate::core::session::{Session, SessionError, SessionHandle, SessionSettings};
 use crate::ports::capture::CaptureBackend;
 use crate::ports::encode::Encoder;
+use crate::ports::transport::DockTransport;
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::{MessageBuilder, ReportId};
-use crate::session::{Session, SessionError, SessionHandle, SessionSettings};
 
 /// Consecutive failed frames after which the daemon gives up.
 pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
@@ -93,8 +93,8 @@ pub struct DaemonReport {
 /// Runs the daemon until `stop` is set, `params.max_frames` frames were sent, or too many frames
 /// in a row failed.
 pub fn run(
-    mi00: HidrawHandle,
-    mut mi01: HidrawHandle,
+    mi00: impl DockTransport,
+    mut mi01: impl DockTransport,
     capture: &mut dyn CaptureBackend,
     encoder: &mut dyn Encoder,
     params: &DaemonParams,
@@ -142,7 +142,7 @@ pub fn run(
 }
 
 fn video_loop(
-    mi01: &mut HidrawHandle,
+    mi01: &mut impl DockTransport,
     capture: &mut dyn CaptureBackend,
     encoder: &mut dyn Encoder,
     params: &DaemonParams,
@@ -270,6 +270,7 @@ fn video_loop(
 mod tests {
     use super::*;
     use crate::adapters::encode::prerecorded::PrerecordedEncoder;
+    use crate::adapters::transport::hidraw::HidrawHandle;
     use crate::ports::capture::{CaptureError, Frame, PixelFormat};
     use crate::ports::encode::EncoderSettings;
     use crate::protocol::display::Orientation;

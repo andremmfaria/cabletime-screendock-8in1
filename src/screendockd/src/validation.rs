@@ -5,9 +5,9 @@
 //! - `run_isolate`: runs heartbeat-only, video-only or both for a fixed duration (Milestone 3,
 //!   heartbeat-dependency isolation).
 //!
-//! Everything takes already-open `HidrawHandle`s, so the same code runs against the real nodes
+//! Everything takes already-open `DockTransport`s, so the same code runs against the real nodes
 //! on the dock and against a file/pipe/socket loopback in tests. Where video is sent together
-//! with an MI_00 handle, the dock session (heartbeat, reader and handshake, see `session.rs`)
+//! with an MI_00 handle, the dock session (heartbeat, reader and handshake, see `core::session`)
 //! runs first and video starts only once it is armed. The routines only measure and
 //! report; what the panel shows is observed by the person running them.
 
@@ -17,11 +17,11 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
+use crate::core::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
 use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
-use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::ports::transport::{DockTransport, TransportError};
 use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
 use crate::protocol::heartbeat::SessionId;
-use crate::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
 
 /// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
 /// Milestone 2 exit criterion is at or below this figure.
@@ -41,7 +41,7 @@ const SLEEP_SLICE: Duration = Duration::from_millis(20);
 pub enum ValidationError {
     /// A hidraw write failed.
     #[error("hidraw I/O failed: {0}")]
-    Io(#[from] HidrawIoError),
+    Io(#[from] TransportError),
     /// The heartbeat loop failed.
     #[error("heartbeat failed: {0}")]
     Heartbeat(#[from] HeartbeatError),
@@ -210,7 +210,7 @@ fn video_chunks(size: PictureSize, message: &[u8]) -> Vec<Vec<u8>> {
     MessageBuilder::video(size).payload(message).build()
 }
 
-fn require_video(handle: &HidrawHandle) -> Result<(), ValidationError> {
+fn require_video(handle: &dyn DockTransport) -> Result<(), ValidationError> {
     if handle.channel() != ReportId::Video {
         return Err(ValidationError::InvalidInput(format!(
             "video writes need the MI_01 (video) channel, got {:?}",
@@ -223,7 +223,7 @@ fn require_video(handle: &HidrawHandle) -> Result<(), ValidationError> {
 /// Replays `messages` in order, `iterations` times, each message back-to-back with no delay
 /// between its chunks and none between messages, recording per-chunk timing.
 pub fn run_replay(
-    handle: &mut HidrawHandle,
+    handle: &mut dyn DockTransport,
     size: PictureSize,
     messages: &[Vec<u8>],
     iterations: usize,
@@ -361,7 +361,7 @@ struct VideoOutcome {
 }
 
 fn run_video_paced(
-    handle: &mut HidrawHandle,
+    handle: &mut dyn DockTransport,
     size: PictureSize,
     gop: &[Vec<u8>],
     fps: u32,
@@ -425,8 +425,8 @@ fn run_video_paced(
 /// run provably never opens or writes to MI_01 (and vice versa).
 pub fn run_isolate(
     params: &IsolateParams,
-    mi00: Option<&mut HidrawHandle>,
-    mi01: Option<&mut HidrawHandle>,
+    mi00: Option<&mut dyn DockTransport>,
+    mi01: Option<&mut dyn DockTransport>,
 ) -> Result<IsolateReport, ValidationError> {
     let mode = params.mode;
     if mode.heartbeat() != mi00.is_some() || mode.video() != mi01.is_some() {
@@ -527,6 +527,7 @@ pub fn run_isolate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::transport::hidraw::HidrawHandle;
     use crate::protocol::framing::parse_chunks;
     use std::fs::{File, OpenOptions};
     use std::io::{Read, Seek, SeekFrom};

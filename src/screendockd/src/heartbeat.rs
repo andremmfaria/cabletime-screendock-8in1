@@ -2,7 +2,7 @@
 //!
 //! Mechanism/policy split: `protocol::heartbeat` is the policy (what the message is, how it is
 //! framed); `run_heartbeat_loop` only schedules ticks and delegates the write to
-//! `HidrawHandle`. The long-running daemon heartbeat lives in `session.rs`, on its own thread
+//! `DockTransport`. The long-running daemon heartbeat lives in `core::session`, on its own thread
 //! next to the MI_00 reader.
 //!
 //! Error policy: the loop stops and returns the first failed write. Whether that is fatal
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::ports::transport::{DockTransport, TransportError};
 use crate::protocol::framing::ReportId;
 use crate::protocol::heartbeat::{heartbeat_message, SessionId};
 
@@ -31,7 +31,7 @@ pub enum HeartbeatError {
     WrongChannel { got: ReportId },
     /// Writing a heartbeat message failed.
     #[error("heartbeat tick {tick} write failed: {source}")]
-    Write { tick: u64, source: HidrawIoError },
+    Write { tick: u64, source: TransportError },
 }
 
 /// Summary of a finished heartbeat loop.
@@ -48,7 +48,7 @@ pub struct HeartbeatStats {
 /// accumulate as drift. The loop ends when `stop` becomes true, when `max_ticks` messages have
 /// been sent, or on the first write error.
 pub fn run_heartbeat_loop(
-    handle: &mut HidrawHandle,
+    handle: &mut dyn DockTransport,
     session_id: &SessionId,
     interval: Duration,
     stop: &AtomicBool,
@@ -90,6 +90,7 @@ pub fn run_heartbeat_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::transport::hidraw::HidrawHandle;
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom};
 

@@ -13,7 +13,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use common::{require_xvfb, Painter, HEIGHT, WIDTH};
-use screendockd::hidraw_io::HidrawHandle;
+use screendockd::adapters::transport::hidraw::HidrawHandle;
 use screendockd::protocol::annexb::messages_from_annexb;
 use screendockd::protocol::framing::{
     ParsedMessage, PictureSize, ReportId, CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX,
