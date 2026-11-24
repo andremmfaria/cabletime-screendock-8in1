@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use crate::capture::Frame;
-use crate::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
+use crate::ports::capture::Frame;
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
 use crate::protocol::annexb::messages_from_annexb;
 
 /// Replays a fixed message sequence in a loop.
@@ -57,7 +57,7 @@ impl Encoder for PrerecordedEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::PixelFormat;
+    use crate::ports::capture::PixelFormat;
     use crate::protocol::display::{DisplayGeometry, Orientation};
 
     fn settings() -> EncoderSettings {

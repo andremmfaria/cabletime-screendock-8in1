@@ -20,9 +20,9 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{debug, info, info_span, warn};
 
-use crate::capture::CaptureBackend;
-use crate::encode::Encoder;
 use crate::hidraw_io::HidrawHandle;
+use crate::ports::capture::CaptureBackend;
+use crate::ports::encode::Encoder;
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::{MessageBuilder, ReportId};
 use crate::session::{Session, SessionError, SessionHandle, SessionSettings};
@@ -269,9 +269,9 @@ fn video_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::{CaptureError, Frame, PixelFormat};
-    use crate::encode::prerecorded::PrerecordedEncoder;
-    use crate::encode::EncoderSettings;
+    use crate::adapters::encode::prerecorded::PrerecordedEncoder;
+    use crate::ports::capture::{CaptureError, Frame, PixelFormat};
+    use crate::ports::encode::EncoderSettings;
     use crate::protocol::display::Orientation;
     use crate::protocol::framing::{parse_chunks, PictureSize};
     use std::fs::OpenOptions;

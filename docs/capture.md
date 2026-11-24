@@ -1,6 +1,6 @@
 # Capture
 
-The capture layer turns the desktop into a stream of `Frame` values for the encoder. It lives in `src/screendockd/src/capture/`.
+The capture layer turns the desktop into a stream of `Frame` values for the encoder. The `CaptureBackend` trait and the `Frame` type are in `src/screendockd/src/ports/capture.rs`; backend selection and the implementations are in `src/screendockd/src/adapters/capture/`.
 
 ## Types
 
@@ -19,7 +19,7 @@ The backend is chosen once at startup by `create_backend(&config, choice)`, whic
 2. `x11` and `wayland` select that backend regardless of the session.
 3. `auto` detects the session type: `$XDG_SESSION_TYPE` set to `wayland` or `x11` decides; otherwise a non-empty `$WAYLAND_DISPLAY` means Wayland, then a non-empty `$DISPLAY` means X11. With none of these set, selection fails with `NoSession`.
 
-## X11 backend (`x11_shm.rs`)
+## X11 backend (`adapters/capture/x11_shm.rs`)
 
 `X11ShmCapture` captures the whole root window through the MIT-SHM extension. It uses `x11rb`, a pure-Rust X11 client, so it needs no system libraries to build.
 
@@ -32,7 +32,7 @@ The backend is chosen once at startup by `create_backend(&config, choice)`, whic
 
 Status: verified against Xvfb with painted content (see [testing.md](testing.md)). Not yet run against a real interactive X11 session.
 
-## Wayland backend (`wayland_portal.rs`)
+## Wayland backend (`adapters/capture/wayland_portal.rs`)
 
 `WaylandPortalCapture` uses the xdg-desktop-portal ScreenCast interface through `ashpd` and consumes frames with `pipewire-rs`. It is compiled only with the cargo feature `capture-wayland`, which needs the libpipewire-0.3 and libspa-0.2 development files plus clang for bindgen. Without the feature the type exists and `connect` returns `BackendUnavailable`.
 

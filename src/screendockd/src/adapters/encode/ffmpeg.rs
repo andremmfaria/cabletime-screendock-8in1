@@ -5,7 +5,7 @@
 //! Constrained Baseline, no B-frames, one slice per frame (so an inter-frame is exactly one
 //! NAL), a single encoder thread (frame threading would delay output by several frames), SPS and
 //! PPS repeated on every keyframe, forced IDR keyframes. The packets come out as Annex-B and go
-//! through [`messages_from_packet`](crate::encode::messages_from_packet).
+//! through [`messages_from_packet`](crate::adapters::encode::messages_from_packet).
 
 use ffmpeg_next as ffmpeg;
 
@@ -13,8 +13,9 @@ use ffmpeg::format::Pixel;
 use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::{codec, encoder, frame, picture, Dictionary, Packet};
 
-use crate::capture::{Frame, PixelFormat};
-use crate::encode::{messages_from_packet, EncodeError, Encoder, EncoderSettings, VideoMessage};
+use crate::adapters::encode::messages_from_packet;
+use crate::ports::capture::{Frame, PixelFormat};
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
 
 /// Scaler plus the source geometry it was built for.
 struct SourceScaler {

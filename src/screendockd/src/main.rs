@@ -23,13 +23,14 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use screendockd::adapters::capture::{create_backend, detect_session};
+use screendockd::adapters::encode::{create_encoder, EncoderKind};
 use screendockd::bench::run_bench;
-use screendockd::capture::{create_backend, detect_session};
 use screendockd::config::{self, CaptureBackendChoice, Config};
 use screendockd::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use screendockd::discovery::{discover_configured, DeviceIds, Mi00Path, Mi01Path};
-use screendockd::encode::{create_encoder, EncoderKind, EncoderSettings};
 use screendockd::hidraw_io::HidrawHandle;
+use screendockd::ports::encode::EncoderSettings;
 use screendockd::protocol::annexb::messages_from_annexb;
 use screendockd::protocol::display::DisplayGeometry;
 use screendockd::protocol::framing::PictureSize;

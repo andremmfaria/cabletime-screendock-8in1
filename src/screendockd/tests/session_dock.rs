@@ -5,11 +5,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use screendockd::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
 use screendockd::daemon::{run, DaemonParams, DaemonReport};
-use screendockd::encode::prerecorded::PrerecordedEncoder;
-use screendockd::encode::EncoderSettings;
 use screendockd::fake_dock::{FakeDock, FakeDockConfig};
+use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use screendockd::ports::encode::EncoderSettings;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
 use screendockd::session::SessionSettings;
 

@@ -10,7 +10,7 @@
 //! pushes it into a bounded queue. The queue holds a few frames and drops the newest when the
 //! consumer lags, so a slow encoder sees recent frames rather than a growing backlog.
 
-use crate::capture::{CaptureBackend, CaptureError, Frame};
+use crate::ports::capture::{CaptureBackend, CaptureError, Frame};
 
 #[cfg(not(feature = "capture-wayland"))]
 pub struct WaylandPortalCapture;
@@ -56,7 +56,7 @@ mod enabled {
     use pw::spa;
 
     use super::{CaptureBackend, CaptureError, Frame};
-    use crate::capture::PixelFormat;
+    use crate::ports::capture::PixelFormat;
 
     /// Frames buffered between the PipeWire thread and the consumer.
     const QUEUE_DEPTH: usize = 2;

@@ -1,10 +1,10 @@
 # Encoding
 
-The `encode` module turns captured frames into the H.264 messages the dock's video channel carries. Source: `src/screendockd/src/encode/`.
+The encode layer turns captured frames into the H.264 messages the dock's video channel carries. The `Encoder` trait and its data types are in `src/screendockd/src/ports/encode.rs`; the implementations and the message policy are in `src/screendockd/src/adapters/encode/`.
 
 ## Message policy
 
-Every encoder produces `VideoMessage` values (Annex-B bytes plus a keyframe flag) under one policy, implemented once in `encode::messages_from_packet`:
+Every encoder produces `VideoMessage` values (Annex-B bytes plus a keyframe flag) under one policy, implemented once in `adapters::encode::messages_from_packet`:
 
 - A keyframe is one message holding the SPS, PPS, SEI and IDR slice NAL units in that order.
 - An inter-frame is one message holding exactly one NAL unit of type 1.
@@ -27,7 +27,7 @@ Errors are the typed `EncodeError` enum: unavailable encoder, setup failure, bac
 
 ## libx264 encoder (feature `encode-ffmpeg`)
 
-`encode::ffmpeg::FfmpegEncoder` drives libx264 through the `ffmpeg-next` crate.
+`adapters::encode::ffmpeg::FfmpegEncoder` drives libx264 through the `ffmpeg-next` crate.
 
 - Input: BGRA or RGBA frames (4 bytes per pixel, any stride). Rows are copied into an AVFrame and converted to yuv420p with swscale (bilinear), scaling to the target size. The scaler is rebuilt if the source size or format changes.
 - Encoder options: `preset` from `encode.preset`, `tune=zerolatency` when `encode.tune_zerolatency` is true, `profile=baseline`, the codec option `forced-idr=1`, and the x264 parameters `bframes=0`, `slices=1`, `sliced-threads=0`, `threads=1`, `aud=0`, `repeat-headers=1`, `keyint` and `min-keyint` equal to `encode.keyframe_interval`, `scenecut=0`, and, when `encode.vbv_buffer_ms` is above 0, `vbv-maxrate` equal to `encode.bitrate_kbps` and `vbv-bufsize` equal to `bitrate_kbps * vbv_buffer_ms / 1000` (both in kilobits). One slice per frame keeps every inter-frame a single NAL unit. One thread avoids the multi-frame delay of frame threading.
@@ -47,7 +47,7 @@ Verification: `tests/encode_ffmpeg.rs` encodes a 30 frame synthetic sequence fro
 
 ## Prerecorded test encoder
 
-`encode::prerecorded::PrerecordedEncoder` replays the messages split from an Annex-B file (for example `ffmpeg ... -f h264`) in a loop, ignoring the pixels it is given. The first message must be a keyframe bundle. It needs no native libraries, so the whole daemon path is testable without libav. The `run` and `bench` commands select it with `--h264-file PATH`. `tests/fixtures/sample.h264` is a 30 frame 320x180 Constrained Baseline stream with a keyframe every 10 frames, used by the daemon tests.
+`adapters::encode::prerecorded::PrerecordedEncoder` replays the messages split from an Annex-B file (for example `ffmpeg ... -f h264`) in a loop, ignoring the pixels it is given. The first message must be a keyframe bundle. It needs no native libraries, so the whole daemon path is testable without libav. The `run` and `bench` commands select it with `--h264-file PATH`. `tests/fixtures/sample.h264` is a 30 frame 320x180 Constrained Baseline stream with a keyframe every 10 frames, used by the daemon tests.
 
 ## Resolution
 

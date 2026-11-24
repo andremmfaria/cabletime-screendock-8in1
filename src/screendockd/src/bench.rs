@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::capture::{CaptureBackend, CaptureError};
-use crate::encode::{EncodeError, Encoder};
+use crate::ports::capture::{CaptureBackend, CaptureError};
+use crate::ports::encode::{EncodeError, Encoder};
 
 /// Errors that abort a measurement.
 #[derive(Debug, Error)]
@@ -242,9 +242,9 @@ pub fn run_bench(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture::{Frame, PixelFormat};
-    use crate::encode::prerecorded::PrerecordedEncoder;
-    use crate::encode::EncoderSettings;
+    use crate::adapters::encode::prerecorded::PrerecordedEncoder;
+    use crate::ports::capture::{Frame, PixelFormat};
+    use crate::ports::encode::EncoderSettings;
     use crate::protocol::display::{DisplayGeometry, Orientation};
 
     struct Paced;

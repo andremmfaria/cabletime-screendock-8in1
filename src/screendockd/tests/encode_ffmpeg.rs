@@ -10,9 +10,9 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use screendockd::capture::{Frame, PixelFormat};
-use screendockd::encode::ffmpeg::FfmpegEncoder;
-use screendockd::encode::{Encoder, EncoderSettings, VideoMessage};
+use screendockd::adapters::encode::ffmpeg::FfmpegEncoder;
+use screendockd::ports::capture::{Frame, PixelFormat};
+use screendockd::ports::encode::{Encoder, EncoderSettings, VideoMessage};
 use screendockd::protocol::annexb::split_nals;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
 

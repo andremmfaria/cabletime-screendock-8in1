@@ -33,14 +33,17 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `validation` | Replay timing and heartbeat isolation routines used by the CLI. They run the dock session first when video is sent with an MI_00 handle | Implemented, loopback tested. Requires on-device validation |
 | `config` | Loads the TOML config through a four step path resolution | Implemented |
 | `telemetry::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
-| `encode` | `Encoder` trait, message policy (`messages_from_packet`), libx264 encoder (`encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
+| `ports::encode` | `Encoder` trait, `VideoMessage`, `EncoderSettings` and `EncodeError`. See [encoding.md](encoding.md) | Implemented |
+| `adapters::encode` | Message policy (`messages_from_packet`), `create_encoder`, libx264 encoder (`adapters::encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`adapters::encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
 | `daemon` | The dock session plus the capture, encode, frame and write loop with the error policy; video is written only while the session is armed. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
 | `bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
-| `capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait, `create_backend` session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
+| `ports::capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait and `CaptureError`. See [capture.md](capture.md) | Implemented, unit tested |
+| `adapters::capture` | `create_backend` and session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
 
 ## Layering rules
 
+- Ports are the traits and data types the daemon depends on (`ports::capture::CaptureBackend`, `ports::encode::Encoder`). The implementations live in `adapters` and are chosen once at startup by `adapters::capture::create_backend` and `adapters::encode::create_encoder`, so the daemon never names a concrete backend or encoder.
 - Mechanism and policy are separate. `hidraw_io` moves framed buffers and checks only that each chunk's Report ID matches the channel the handle was opened for. `protocol::framing`, `protocol::heartbeat` and `protocol::messages` define what messages mean and never touch a file descriptor.
 - Domain values are newtypes: the two node paths cannot be swapped, a pixel width cannot be passed where a height is expected, and Report IDs are a closed enum.
 - Library modules return typed `thiserror` enums. `main.rs` is the application boundary and uses `anyhow` with context, so failures print a readable chain and exit nonzero.

@@ -15,7 +15,7 @@ use x11rb::protocol::shm::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, ImageOrder, Window};
 use x11rb::rust_connection::RustConnection;
 
-use crate::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use crate::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 
 /// Bytes per pixel the backend accepts (24-bit depth stored in 32-bit pixels).
 const BYTES_PER_PIXEL: usize = 4;

@@ -9,8 +9,8 @@ mod common;
 use std::process::Command;
 
 use common::{require_xvfb, Painter, HEIGHT, WIDTH};
-use screendockd::capture::x11_shm::X11ShmCapture;
-use screendockd::capture::{CaptureBackend, PixelFormat};
+use screendockd::adapters::capture::x11_shm::X11ShmCapture;
+use screendockd::ports::capture::{CaptureBackend, PixelFormat};
 
 #[test]
 fn captures_painted_regions_with_exact_pixels() {
