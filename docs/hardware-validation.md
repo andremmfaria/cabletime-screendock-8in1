@@ -8,8 +8,8 @@ Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation
 
 - Report layout: every continuation report of a multi-report message carries a full 16-byte header (Report ID, then 15 zero bytes) followed by up to 4080 payload bytes. A looped H.264 test stream sent with this layout, with the picture width and height in header bytes 8 to 11 and 12 to 15, rendered a picture on the panel. This was confirmed with a Python prototype that writes the same byte layout as `framing.rs`; the Rust build has not been run against the dock.
 - Session handshake: after a fresh replug the full handshake worked with the replies this driver expects: the `app-launched` result `{res-width,res-height}`, the `notify-projection-started` result `isAllowed`, and an EDID passthrough (id 101) from the dock about every 5 seconds until answered. The Python prototype did this; the Rust session has not been run against the dock.
-- A dock that already holds a projection session from an earlier host process (heartbeat gap under about 5 seconds, or none) sends no `notify-app-accessories-are-ready` and does not answer `app-launched` or `notify-projection-started`, yet renders video with only heartbeats and correctly framed video. The session handles this with bounded waits and the `AssumedActive` state.
-- Known open item: tearing is visible on fast motion and is being examined.
+- A dock that already holds a projection session from an earlier host process (heartbeat gap under about 5 seconds, or none) sends no `notify-app-accessories-are-ready` and does not answer `app-launched` or `notify-projection-started`, yet renders video with only heartbeats and correctly framed video. The session handles this with bounded waits: when the dock sends neither a ready announcement nor any MI_00 message, the session arms video in `AssumedActive` after the 3 second ready wait, with heartbeats still sent, and runs the full handshake if the dock later announces ready. Status: requires on-device validation of the Rust session.
+- Known open item: tearing is visible on fast motion when a Python prototype streams a looped H.264 file at 25 fps with sleep paced writes.
 
 ## Preparation
 
@@ -97,7 +97,7 @@ Goal: confirm that `screendockd run` brings up the panel from a freshly plugged 
 
 - The log sequence: the state changes (`WaitingForReady`, `AppLaunchedSent`, `ProjectionStartedSent`, `Settling`), the `session armed` line with the armed state (`Active` or `AssumedActive`), and any `handshake failed`, `session lost` or `no answer from the dock` warnings.
 - The time from process start to the first picture on the panel.
-- The same run again without replugging (the dock then holds the session from the first run): the expected log is `AssumedActive` after the 3 second ready wait.
+- The same run again without replugging (the dock then holds the session from the first run): the expected log is `AssumedActive` after the 3 second ready wait, whether or not dock heartbeats are seen, and the picture appears.
 - Whether the picture survives stopping and restarting the process, and unplugging and replugging while `run` is active.
 
 Status: requires on-device validation of the Rust implementation. See the verified facts at the top of this page for what the Python prototype showed.

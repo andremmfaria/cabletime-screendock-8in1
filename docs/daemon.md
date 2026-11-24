@@ -31,7 +31,7 @@ Startup is fail fast. In this order, any failure prints the error chain and exit
 
 ## Errors after startup
 
-Failures in the loop are per frame and recoverable. A failed capture, encode or write is logged at warn level and counted, the frame or message is dropped, and the loop continues. After an encode failure or a failed write the encoder is asked for a keyframe so the panel can resynchronize. A failed heartbeat write is logged and retried at the next tick. A failed video write is reported to the session, which redoes the handshake. If the MI_00 reader dies (read error or end of stream) the daemon exits with an error.
+Failures in the loop are per frame and recoverable. A failed capture, encode or write is logged at warn level and counted, the frame or message is dropped, and the loop continues. After an encode failure or a failed write the encoder is asked for a keyframe so the panel can resynchronize. A failed heartbeat write is logged and retried at the next tick. Three consecutive failed video writes are reported to the session, which redoes the handshake. If the MI_00 reader dies (read error or end of stream) the daemon exits with an error.
 
 After 100 consecutive failed frames the daemon exits with an error, so a supervisor restarts it instead of the daemon spinning against a dead device. A successful frame resets the count. A progress line (frames, messages, write errors) is logged every 5 seconds at info level.
 
