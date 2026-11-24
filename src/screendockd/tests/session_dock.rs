@@ -134,6 +134,32 @@ fn dock_holding_a_session_gets_video_after_the_bounded_wait() {
 }
 
 #[test]
+fn fully_silent_dock_gets_video_in_assumed_active() {
+    // No ready announcement, no heartbeat echo and no replies.
+    let mut config = FakeDockConfig::holding_session();
+    config.heartbeat_interval = None;
+    let (dock, mi00, mi01) = FakeDock::spawn_with_video(config);
+    let stop = AtomicBool::new(false);
+    let report = run(
+        mi00,
+        mi01,
+        &mut Solid,
+        &mut encoder(),
+        &params(Some(5)),
+        &stop,
+    )
+    .unwrap();
+    assert_eq!(report.frames_sent, 5);
+    assert_eq!(report.dock_heartbeats_seen, 0);
+    assert!(non_heartbeat(&dock).is_empty());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while dock.video_stats().messages < 5 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(dock.video_stats().messages, 5);
+}
+
+#[test]
 fn lost_session_pauses_video_and_is_redone_without_restarting() {
     let (dock, mi00, mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
     let stop = AtomicBool::new(false);
