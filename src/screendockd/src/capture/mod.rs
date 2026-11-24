@@ -1,30 +1,399 @@
-//! Capture backend abstraction (Milestone 4).
+//! Screen capture backends.
 //!
-//! Per `docs/implementation-plan.md`'s Architecture and Screen Capture sections: a
-//! `CaptureBackend` trait with two implementations — `x11_shm` (XShm, for X11/Xorg sessions) and
-//! `wayland_portal` (xdg-desktop-portal + PipeWire, for Wayland sessions) — selected at runtime
-//! (detected session type) or build time (feature flag). During development on the headless
-//! Linux host, each backend points at a virtual/headless display server (Xvfb or headless
-//! Weston) rather than a real session, per Milestone 4's two-stage validation plan.
-//!
-//! Not implemented here: this module is structural scaffolding only. Milestone 4 fills in the
-//! real `Frame` representation (pixel format, dimensions, buffer ownership) and both backend
-//! implementations.
+//! A [`CaptureBackend`] produces [`Frame`]s from the desktop. Two implementations exist:
+//! [`x11_shm::X11ShmCapture`] (XShm over a pure-Rust X11 client) and
+//! [`wayland_portal::WaylandPortalCapture`] (xdg-desktop-portal ScreenCast plus PipeWire, behind
+//! the `capture-wayland` cargo feature). [`create_backend`] picks one once at startup and hands
+//! back a boxed trait object, so the rest of the daemon never names a concrete backend.
 
 pub mod wayland_portal;
 pub mod x11_shm;
 
-/// Minimal placeholder; Milestone 4 will define the real captured-frame representation.
-#[derive(Debug)]
-pub struct Frame;
+use std::fmt;
+use std::path::Path;
 
-/// Minimal placeholder error type; Milestone 4 will give this real variants (no session,
-/// portal/PipeWire negotiation failure, XShm attach failure, etc.).
-#[derive(Debug)]
-pub struct CaptureError;
+use thiserror::Error;
 
-/// Common interface the encode loop consumes, independent of which backend is active.
-pub trait CaptureBackend {
-    /// Blocks until the next frame is available and returns it.
+use crate::utils::config::{CaptureBackendChoice, Config};
+
+/// Layout of the bytes in one pixel of a [`Frame`]. All supported layouts use four bytes per
+/// pixel; the name lists the byte order in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelFormat {
+    /// Bytes B, G, R, unused (X11 little-endian 24-bit depth in 32-bit pixels).
+    Bgrx8888,
+    /// Bytes B, G, R, A.
+    Bgra8888,
+    /// Bytes R, G, B, unused.
+    Rgbx8888,
+    /// Bytes R, G, B, A.
+    Rgba8888,
+}
+
+impl PixelFormat {
+    /// Bytes occupied by one pixel.
+    pub const fn bytes_per_pixel(self) -> usize {
+        4
+    }
+
+    /// Index of the (red, green, blue) bytes within a pixel.
+    const fn rgb_offsets(self) -> (usize, usize, usize) {
+        match self {
+            PixelFormat::Bgrx8888 | PixelFormat::Bgra8888 => (2, 1, 0),
+            PixelFormat::Rgbx8888 | PixelFormat::Rgba8888 => (0, 1, 2),
+        }
+    }
+}
+
+/// One captured image. Rows are `stride` bytes apart and may carry padding after the last pixel.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Frame {
+    pub width: u32,
+    pub height: u32,
+    pub format: PixelFormat,
+    /// Bytes from the start of one row to the start of the next.
+    pub stride: usize,
+    pub data: Vec<u8>,
+}
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Frame")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("format", &self.format)
+            .field("stride", &self.stride)
+            .field("data_len", &self.data.len())
+            .finish()
+    }
+}
+
+impl Frame {
+    /// Builds a frame, checking that `stride` covers a full row and `data` covers every row.
+    pub fn new(
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        stride: usize,
+        data: Vec<u8>,
+    ) -> Result<Self, CaptureError> {
+        let row_bytes = width as usize * format.bytes_per_pixel();
+        if width == 0 || height == 0 {
+            return Err(CaptureError::InvalidFrame(format!(
+                "empty frame {width}x{height}"
+            )));
+        }
+        if stride < row_bytes {
+            return Err(CaptureError::InvalidFrame(format!(
+                "stride {stride} is smaller than a row of {row_bytes} bytes"
+            )));
+        }
+        // The last row does not need trailing padding.
+        let needed = stride * (height as usize - 1) + row_bytes;
+        if data.len() < needed {
+            return Err(CaptureError::InvalidFrame(format!(
+                "buffer holds {} bytes, {needed} needed for {width}x{height} at stride {stride}",
+                data.len()
+            )));
+        }
+        Ok(Self {
+            width,
+            height,
+            format,
+            stride,
+            data,
+        })
+    }
+
+    /// Returns the (r, g, b) value of the pixel at (`x`, `y`), or `None` when out of range.
+    pub fn pixel_rgb(&self, x: u32, y: u32) -> Option<(u8, u8, u8)> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let bpp = self.format.bytes_per_pixel();
+        let at = y as usize * self.stride + x as usize * bpp;
+        let (r, g, b) = self.format.rgb_offsets();
+        let px = self.data.get(at..at + bpp)?;
+        Some((px[r], px[g], px[b]))
+    }
+
+    /// Packs the frame into tightly packed 8-bit RGB, dropping stride padding and alpha.
+    pub fn to_rgb8(&self) -> Vec<u8> {
+        let (r, g, b) = self.format.rgb_offsets();
+        let bpp = self.format.bytes_per_pixel();
+        let mut out = Vec::with_capacity(self.width as usize * self.height as usize * 3);
+        for y in 0..self.height as usize {
+            let row = &self.data[y * self.stride..y * self.stride + self.width as usize * bpp];
+            for px in row.chunks_exact(bpp) {
+                out.extend_from_slice(&[px[r], px[g], px[b]]);
+            }
+        }
+        out
+    }
+
+    /// Writes the frame to `path` as an 8-bit RGB PNG.
+    pub fn write_png(&self, path: &Path) -> Result<(), CaptureError> {
+        let file = std::fs::File::create(path)?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), self.width, self.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| CaptureError::Png(e.to_string()))?;
+        writer
+            .write_image_data(&self.to_rgb8())
+            .map_err(|e| CaptureError::Png(e.to_string()))?;
+        writer
+            .finish()
+            .map_err(|e| CaptureError::Png(e.to_string()))
+    }
+}
+
+/// Failures from selecting or running a capture backend.
+#[derive(Debug, Error)]
+pub enum CaptureError {
+    /// Neither `$XDG_SESSION_TYPE`, `$WAYLAND_DISPLAY` nor `$DISPLAY` identify a session.
+    #[error(
+        "no graphical session detected ($XDG_SESSION_TYPE, $WAYLAND_DISPLAY and $DISPLAY are unset)"
+    )]
+    NoSession,
+    /// The selected backend exists but cannot run in this build or session.
+    #[error("capture backend {backend} unavailable: {reason}")]
+    BackendUnavailable {
+        backend: &'static str,
+        reason: String,
+    },
+    /// Connecting to the display server or portal failed.
+    #[error("capture connection failed: {0}")]
+    Connection(String),
+    /// Shared memory setup or the XShm request failed.
+    #[error("shared memory capture failed: {0}")]
+    Shm(String),
+    /// The desktop portal refused or aborted the ScreenCast session.
+    #[error("screencast portal error: {0}")]
+    Portal(String),
+    /// The PipeWire stream failed or ended.
+    #[error("pipewire stream error: {0}")]
+    Stream(String),
+    /// The backend produced a buffer that does not match its stated geometry or format.
+    #[error("invalid frame: {0}")]
+    InvalidFrame(String),
+    /// PNG encoding failed.
+    #[error("png encoding failed: {0}")]
+    Png(String),
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Common interface the encode loop consumes, independent of which backend is active. Object
+/// safe, and `Send` so a boxed backend can move into the capture thread.
+pub trait CaptureBackend: Send {
+    /// Short backend identifier for logs (`"x11-shm"`, `"wayland-portal"`).
+    fn name(&self) -> &'static str;
+
+    /// Blocks until the next frame is due and returns it.
     fn next_frame(&mut self) -> Result<Frame, CaptureError>;
+}
+
+/// Kind of graphical session the daemon runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionType {
+    X11,
+    Wayland,
+    Unknown,
+}
+
+/// Classifies the session from environment values read through `get`. `$XDG_SESSION_TYPE` wins
+/// when it names `x11` or `wayland`; otherwise `$WAYLAND_DISPLAY` is checked before `$DISPLAY`
+/// (an XWayland session sets both, and only Wayland capture sees the whole desktop).
+pub fn detect_session_with(get: impl Fn(&str) -> Option<String>) -> SessionType {
+    let non_empty = |name: &str| get(name).filter(|v| !v.is_empty());
+    match non_empty("XDG_SESSION_TYPE")
+        .map(|v| v.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("wayland") => return SessionType::Wayland,
+        Some("x11") => return SessionType::X11,
+        _ => {}
+    }
+    if non_empty("WAYLAND_DISPLAY").is_some() {
+        SessionType::Wayland
+    } else if non_empty("DISPLAY").is_some() {
+        SessionType::X11
+    } else {
+        SessionType::Unknown
+    }
+}
+
+/// [`detect_session_with`] over the process environment.
+pub fn detect_session() -> SessionType {
+    detect_session_with(|name| std::env::var(name).ok())
+}
+
+/// Concrete backend selected by [`select_backend`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendKind {
+    X11Shm,
+    WaylandPortal,
+}
+
+/// Resolves the configured choice against the detected session. An explicit choice always wins;
+/// `Auto` follows the session and fails when there is none.
+pub fn select_backend(
+    choice: CaptureBackendChoice,
+    session: SessionType,
+) -> Result<BackendKind, CaptureError> {
+    match (choice, session) {
+        (CaptureBackendChoice::X11, _) => Ok(BackendKind::X11Shm),
+        (CaptureBackendChoice::Wayland, _) => Ok(BackendKind::WaylandPortal),
+        (CaptureBackendChoice::Auto, SessionType::X11) => Ok(BackendKind::X11Shm),
+        (CaptureBackendChoice::Auto, SessionType::Wayland) => Ok(BackendKind::WaylandPortal),
+        (CaptureBackendChoice::Auto, SessionType::Unknown) => Err(CaptureError::NoSession),
+    }
+}
+
+/// Selects and constructs the capture backend once at startup.
+pub fn create_backend(
+    config: &Config,
+    choice: CaptureBackendChoice,
+) -> Result<Box<dyn CaptureBackend>, CaptureError> {
+    let kind = select_backend(choice, detect_session())?;
+    tracing::info!(?kind, ?choice, "selected capture backend");
+    match kind {
+        BackendKind::X11Shm => Ok(Box::new(x11_shm::X11ShmCapture::connect(
+            config.capture.x11_display.as_deref(),
+            config.capture.fps,
+        )?)),
+        BackendKind::WaylandPortal => Ok(Box::new(wayland_portal::WaylandPortalCapture::connect(
+            config.display.width,
+            config.display.height,
+            config.capture.fps,
+        )?)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn session(vars: &[(&str, &str)]) -> SessionType {
+        let map: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        detect_session_with(|name| map.get(name).cloned())
+    }
+
+    #[test]
+    fn xdg_session_type_wins() {
+        assert_eq!(
+            session(&[("XDG_SESSION_TYPE", "wayland"), ("DISPLAY", ":0")]),
+            SessionType::Wayland
+        );
+        assert_eq!(
+            session(&[
+                ("XDG_SESSION_TYPE", "X11"),
+                ("WAYLAND_DISPLAY", "wayland-0")
+            ]),
+            SessionType::X11
+        );
+    }
+
+    #[test]
+    fn falls_back_to_display_variables() {
+        assert_eq!(
+            session(&[
+                ("XDG_SESSION_TYPE", "tty"),
+                ("WAYLAND_DISPLAY", "wayland-0")
+            ]),
+            SessionType::Wayland
+        );
+        assert_eq!(session(&[("DISPLAY", ":0")]), SessionType::X11);
+        assert_eq!(
+            session(&[("DISPLAY", ":0"), ("WAYLAND_DISPLAY", "wayland-0")]),
+            SessionType::Wayland
+        );
+        assert_eq!(session(&[("DISPLAY", "")]), SessionType::Unknown);
+        assert_eq!(session(&[]), SessionType::Unknown);
+    }
+
+    #[test]
+    fn explicit_choice_overrides_session() {
+        assert_eq!(
+            select_backend(CaptureBackendChoice::X11, SessionType::Wayland).unwrap(),
+            BackendKind::X11Shm
+        );
+        assert_eq!(
+            select_backend(CaptureBackendChoice::Wayland, SessionType::Unknown).unwrap(),
+            BackendKind::WaylandPortal
+        );
+        assert_eq!(
+            select_backend(CaptureBackendChoice::Auto, SessionType::X11).unwrap(),
+            BackendKind::X11Shm
+        );
+        assert!(matches!(
+            select_backend(CaptureBackendChoice::Auto, SessionType::Unknown),
+            Err(CaptureError::NoSession)
+        ));
+    }
+
+    #[test]
+    fn frame_validates_geometry() {
+        assert!(Frame::new(2, 2, PixelFormat::Bgrx8888, 8, vec![0; 16]).is_ok());
+        assert!(Frame::new(2, 2, PixelFormat::Bgrx8888, 4, vec![0; 16]).is_err());
+        assert!(Frame::new(2, 2, PixelFormat::Bgrx8888, 8, vec![0; 15]).is_err());
+        assert!(Frame::new(0, 2, PixelFormat::Bgrx8888, 8, vec![0; 16]).is_err());
+    }
+
+    #[test]
+    fn pixel_access_honours_format_and_stride() {
+        // 1x2 image, stride 8 (4 bytes padding per row).
+        let data = vec![1, 2, 3, 0, 9, 9, 9, 9, 10, 20, 30, 0, 9, 9, 9, 9];
+        let bgrx = Frame::new(1, 2, PixelFormat::Bgrx8888, 8, data.clone()).unwrap();
+        assert_eq!(bgrx.pixel_rgb(0, 0), Some((3, 2, 1)));
+        assert_eq!(bgrx.pixel_rgb(0, 1), Some((30, 20, 10)));
+        assert_eq!(bgrx.pixel_rgb(1, 0), None);
+        assert_eq!(bgrx.to_rgb8(), vec![3, 2, 1, 30, 20, 10]);
+        let rgba = Frame::new(1, 2, PixelFormat::Rgba8888, 8, data).unwrap();
+        assert_eq!(rgba.pixel_rgb(0, 0), Some((1, 2, 3)));
+    }
+
+    #[test]
+    fn png_round_trips() {
+        let frame = Frame::new(
+            2,
+            1,
+            PixelFormat::Bgrx8888,
+            8,
+            vec![0, 0, 255, 0, 255, 0, 0, 0],
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.png");
+        frame.write_png(&path).unwrap();
+        let decoder = png::Decoder::new(std::fs::File::open(&path).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buf = vec![0; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!((info.width, info.height), (2, 1));
+        assert_eq!(&buf[..6], &[255, 0, 0, 0, 0, 255]);
+    }
+
+    /// The trait must stay usable as a boxed trait object.
+    #[test]
+    fn backend_trait_is_object_safe() {
+        struct Fixed;
+        impl CaptureBackend for Fixed {
+            fn name(&self) -> &'static str {
+                "fixed"
+            }
+            fn next_frame(&mut self) -> Result<Frame, CaptureError> {
+                Frame::new(1, 1, PixelFormat::Rgba8888, 4, vec![1, 2, 3, 4])
+            }
+        }
+        let mut b: Box<dyn CaptureBackend> = Box::new(Fixed);
+        assert_eq!(b.name(), "fixed");
+        assert_eq!(b.next_frame().unwrap().pixel_rgb(0, 0), Some((1, 2, 3)));
+    }
 }

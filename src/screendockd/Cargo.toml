@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -49,6 +49,24 @@ clap = { version = "4", features = ["derive"] }
 #   - ffmpeg-next / ffmpeg_sys_next (Milestone 5: encode.rs, libx264 via libavcodec)
 #   - x11 / xcb-family crate       (Milestone 4: capture/x11_shm.rs)
 #   - ashpd, pipewire              (Milestone 4: capture/wayland_portal.rs)
+
+# capture/x11_shm.rs: pure-Rust X11 client with the MIT-SHM extension; needs no system libs.
+x11rb = { version = "0.14", features = ["shm"] }
+# Anonymous shared-memory segment (memfd) handed to the X server for XShm captures, and the
+# mapping used to read it.
+rustix = { version = "1", features = ["fs"] }
+memmap2 = "0.9"
+# `capture` subcommand: writes captured frames as PNG.
+png = "0.17"
+# Wayland capture (feature `capture-wayland`): xdg-desktop-portal ScreenCast via ashpd, frames
+# consumed from PipeWire. Needs libpipewire-0.3 dev files at build time.
+ashpd = { version = "0.14", optional = true, default-features = false, features = ["screencast", "tokio"] }
+pipewire = { version = "0.10", optional = true }
+tokio = { version = "1", optional = true, features = ["rt", "macros"] }
+
+[features]
+default = []
+capture-wayland = ["dep:ashpd", "dep:pipewire", "dep:tokio"]
 
 [dev-dependencies]
 tempfile = "3"

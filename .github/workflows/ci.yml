@@ -53,5 +53,17 @@ jobs:
       - name: Build (cargo build)
         run: cargo build --verbose
 
+      # SCREENDOCK_REQUIRE_XVFB turns "Xvfb missing or unusable" from a skip into a failure, so
+      # the X11 capture tests cannot silently stop running in CI.
       - name: Test (cargo test)
         run: cargo test --verbose
+        env:
+          SCREENDOCK_REQUIRE_XVFB: "1"
+
+      # The Wayland backend needs the PipeWire development files (and clang for bindgen); this
+      # compile check keeps the feature building even though no portal exists on the runner.
+      - name: Install PipeWire development packages
+        run: sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
+
+      - name: Lint with capture-wayland feature
+        run: cargo clippy --all-targets --features capture-wayland -- -D warnings

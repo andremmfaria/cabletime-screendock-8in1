@@ -4,6 +4,7 @@
 //! - `discover`: resolve and print the dock's MI_00/MI_01 hidraw nodes.
 //! - `replay`: Milestone 2 write-timing test against MI_01.
 //! - `isolate`: Milestone 3 heartbeat/video/both isolation test.
+//! - `capture`: grab N frames from the desktop and write them as PNG files.
 //!
 //! The capture/encode daemon is not wired yet. `docs/hardware-validation.md` describes how the
 //! `replay` and `isolate` subcommands are used on the dock.
@@ -19,10 +20,11 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use screendockd::annexb::messages_from_annexb;
+use screendockd::capture::{create_backend, detect_session};
 use screendockd::discovery::{discover, Mi00Path, Mi01Path};
 use screendockd::framing::PixelWidth;
 use screendockd::hidraw_io::HidrawHandle;
-use screendockd::utils::config::{self, Config};
+use screendockd::utils::config::{self, CaptureBackendChoice, Config};
 use screendockd::utils::logging::init_logging;
 use screendockd::validation::{
     run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, IsolateMode,
@@ -50,6 +52,38 @@ enum Command {
     Replay(ReplayArgs),
     /// Milestone 3: run heartbeat-only, video-only or both for a fixed duration.
     Isolate(IsolateArgs),
+    /// Milestone 4: capture frames from the desktop and write them as PNG files.
+    Capture(CaptureArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BackendArg {
+    Auto,
+    X11,
+    Wayland,
+}
+
+impl From<BackendArg> for CaptureBackendChoice {
+    fn from(arg: BackendArg) -> Self {
+        match arg {
+            BackendArg::Auto => CaptureBackendChoice::Auto,
+            BackendArg::X11 => CaptureBackendChoice::X11,
+            BackendArg::Wayland => CaptureBackendChoice::Wayland,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct CaptureArgs {
+    /// Number of frames to capture.
+    #[arg(long, default_value_t = 5)]
+    frames: u32,
+    /// Directory the `frame-NNNN.png` files are written to (created if missing).
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    out_dir: PathBuf,
+    /// Backend, overriding the configured `capture.backend`.
+    #[arg(long, value_enum)]
+    backend: Option<BackendArg>,
 }
 
 /// Where the hidraw nodes come from.
@@ -262,6 +296,36 @@ fn main() -> Result<()> {
             let report = run_isolate(&params, mi00_handle.as_mut(), mi01_handle.as_mut())
                 .context("isolation run failed")?;
             println!("{report}");
+        }
+        Command::Capture(args) => {
+            if args.frames == 0 {
+                bail!("--frames must be greater than zero");
+            }
+            std::fs::create_dir_all(&args.out_dir)
+                .with_context(|| format!("failed to create {:?}", args.out_dir))?;
+            let choice = args.backend.map_or(config.capture.backend, Into::into);
+            println!("detected session: {:?}", detect_session());
+            let mut backend = create_backend(&config, choice).context("failed to start capture")?;
+            println!(
+                "backend: {} (panel target {}x{})",
+                backend.name(),
+                config.display.width,
+                config.display.height
+            );
+            for i in 0..args.frames {
+                let frame = backend.next_frame().context("capture failed")?;
+                let path = args.out_dir.join(format!("frame-{i:04}.png"));
+                frame
+                    .write_png(&path)
+                    .with_context(|| format!("failed to write {path:?}"))?;
+                println!(
+                    "{}: {}x{} {:?}",
+                    path.display(),
+                    frame.width,
+                    frame.height,
+                    frame.format
+                );
+            }
         }
     }
     Ok(())
