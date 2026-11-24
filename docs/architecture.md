@@ -25,7 +25,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `utils::config` | Loads the TOML config through a four step path resolution | Implemented |
 | `utils::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
 | `encode` | H.264 encoder wrapper | Stub |
-| `capture` | `CaptureBackend` trait, X11 and Wayland backends | Stub |
+| `capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait, `create_backend` session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
 
 ## Layering rules
 
@@ -37,8 +37,8 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 
 ## Command line
 
-The binary currently provides `discover`, `replay` and `isolate`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). The capture and encode daemon is not wired yet.
+The binary provides `discover`, `replay`, `isolate` and `capture`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). The capture and encode daemon is not wired yet.
 
 ## Tests
 
-`cargo test` in `src/screendockd` runs unit tests and the `tests/framing.rs` integration tests. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`. No test needs a dock, a hidraw node or a display.
+`cargo test` in `src/screendockd` runs unit tests and the `tests/framing.rs` integration tests. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`. No default test needs a dock or a hidraw node. The X11 capture test starts its own Xvfb and skips when Xvfb is not installed. See [testing.md](testing.md).

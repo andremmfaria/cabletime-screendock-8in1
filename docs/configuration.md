@@ -15,9 +15,12 @@ The command line option `--config PATH` bypasses this order and loads that file 
 
 | Key | Type | Default | Used by |
 |---|---|---|---|
-| `display.width` | integer | 1280 | Target width in pixels; sets header field B (`width * 256`) for video. Overridable per run with `--width` |
-| `display.height` | integer | 720 | Parsed, not yet consumed |
+| `display.width` | integer | 1280 | Target width in pixels; sets header field B (`width * 256`) for video. Passed to the Wayland backend as the preferred stream width and printed by `capture`. Overridable per run with `--width` |
+| `display.height` | integer | 720 | Preferred stream height for the Wayland backend; printed by `capture` |
 | `display.orientation` | string | `landscape` | Parsed, not yet consumed. `landscape` or `portrait` |
+| `capture.backend` | string | `auto` | `auto`, `x11` or `wayland`. `auto` follows the detected session (`$XDG_SESSION_TYPE`, then `$WAYLAND_DISPLAY`, then `$DISPLAY`). `wayland` needs a build with the `capture-wayland` feature |
+| `capture.x11_display` | string | unset | X11 display to capture, for example `:0`. Unset uses `$DISPLAY` |
+| `capture.fps` | integer | 25 | Capture frame rate. 0 captures as fast as the backend allows |
 | `daemon.log_level` | string | `info` | Default log filter: `trace`, `debug`, `info`, `warn` or `error` |
 | `daemon.heartbeat_interval_ms` | integer | 1000 | Heartbeat tick interval in milliseconds |
 | `device.vendor_id_hex` | string | `1de1` | Parsed, not yet consumed |
@@ -39,6 +42,7 @@ discover
 replay  [--mi01 PATH] [--width N] [--h264-file PATH] [--iterations N]
 isolate --mode heartbeat|video|both [--mi00 PATH] [--mi01 PATH] [--width N]
         [--h264-file PATH] [--duration-secs N] [--fps N]
+capture [--frames N] [--out-dir DIR] [--backend auto|x11|wayland]
 ```
 
 | Option | Default | Meaning |
@@ -50,8 +54,11 @@ isolate --mode heartbeat|video|both [--mi00 PATH] [--mi01 PATH] [--width N]
 | `--mode` | required | `isolate` condition |
 | `--duration-secs` | 30 | `isolate` run length |
 | `--fps` | 25 | `isolate` video frame rate |
+| `--frames` | 5 | Frames `capture` writes as `frame-NNNN.png` |
+| `--out-dir` | current directory | Directory for `capture` output, created if missing |
+| `--backend` | `capture.backend` | Capture backend for this run |
 
-Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00.
+Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `capture` never touches the dock; see [capture.md](capture.md).
 
 ## Permissions
 
