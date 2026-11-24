@@ -95,7 +95,7 @@ A written observation for all three conditions, not only (c).
 
 Goal: confirm that `screendockd run` brings up the panel from a freshly plugged dock without any other host software. Unplug and replug the dock, wait for it to settle, then run `RUST_LOG=debug screendockd run --h264-file test.h264`. Record:
 
-- The log sequence: the state changes (`WaitingForReady`, `AppLaunchedSent`, `ProjectionStartedSent`, `Settling`), the `session armed` line with the armed state (`Active` or `AssumedActive`), and any `handshake failed`, `session lost` or `no answer from the dock` warnings.
+- The log sequence: the state changes (`WaitingForReady`, `AppLaunchedSent`, `ProjectionStartedSent`, `Settling`), the `session armed` line with the armed state (`Active` or `AssumedActive`), and any `dock did not announce ready`, `handshake failed`, `session lost` or `no answer from the dock` warnings.
 - The time from process start to the first picture on the panel.
 - The same run again without replugging (the dock then holds the session from the first run): the expected log is the 3 second ready wait, the four handshake messages sent without `notify-projection-stopped`, then `AssumedActive` after the 0.8 s settle delay, whether or not dock heartbeats are seen, and the picture appears and the Connecting screen goes away.
 - Whether the picture survives stopping and restarting the process, and unplugging and replugging while `run` is active.
