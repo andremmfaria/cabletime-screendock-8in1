@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::discovery::{Mi00Path, Mi01Path};
-use crate::framing::{
+use crate::protocol::framing::{
     parse_chunks, FrameHeader, FramingError, ParsedMessage, ReportId,
     CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
 };
@@ -278,7 +278,7 @@ impl HidrawHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::framing::{frame_message, MessageBuilder, PictureSize};
+    use crate::protocol::framing::{frame_message, MessageBuilder, PictureSize};
     use std::io::{Seek, SeekFrom};
     use std::os::fd::OwnedFd;
 

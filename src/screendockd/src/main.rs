@@ -23,18 +23,18 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use screendockd::annexb::messages_from_annexb;
 use screendockd::bench::run_bench;
 use screendockd::capture::{create_backend, detect_session};
+use screendockd::config::{self, CaptureBackendChoice, Config};
 use screendockd::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use screendockd::discovery::{discover_configured, DeviceIds, Mi00Path, Mi01Path};
-use screendockd::display::DisplayGeometry;
 use screendockd::encode::{create_encoder, EncoderKind, EncoderSettings};
-use screendockd::framing::PictureSize;
 use screendockd::hidraw_io::HidrawHandle;
+use screendockd::protocol::annexb::messages_from_annexb;
+use screendockd::protocol::display::DisplayGeometry;
+use screendockd::protocol::framing::PictureSize;
 use screendockd::session::{Session, SessionSettings};
-use screendockd::utils::config::{self, CaptureBackendChoice, Config};
-use screendockd::utils::logging::init_logging;
+use screendockd::telemetry::logging::init_logging;
 use screendockd::validation::{
     run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, wait_until_armed,
     IsolateMode, IsolateParams,

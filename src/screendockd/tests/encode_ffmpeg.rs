@@ -10,11 +10,11 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use screendockd::annexb::split_nals;
 use screendockd::capture::{Frame, PixelFormat};
-use screendockd::display::{DisplayGeometry, Orientation};
 use screendockd::encode::ffmpeg::FfmpegEncoder;
 use screendockd::encode::{Encoder, EncoderSettings, VideoMessage};
+use screendockd::protocol::annexb::split_nals;
+use screendockd::protocol::display::{DisplayGeometry, Orientation};
 
 const SRC_W: u32 = 640;
 const SRC_H: u32 = 480;
@@ -27,7 +27,7 @@ fn settings(width: u32, height: u32, orientation: Orientation) -> EncoderSetting
         fps: 25,
         keyframe_interval: KEYFRAME_INTERVAL,
         bitrate_kbps: 1500,
-        preset: screendockd::utils::config::X264Preset::Ultrafast,
+        preset: screendockd::config::X264Preset::Ultrafast,
         zerolatency: true,
         vbv_buffer_ms: 200,
     }

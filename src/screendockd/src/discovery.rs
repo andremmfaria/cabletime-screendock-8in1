@@ -191,9 +191,7 @@ fn normalize_id(field: &'static str, value: &str) -> Result<String, DiscoveryErr
 
 impl DeviceIds {
     /// Validates and normalizes the `[device]` config section.
-    pub fn from_config(
-        device: &crate::utils::config::DeviceConfig,
-    ) -> Result<Self, DiscoveryError> {
+    pub fn from_config(device: &crate::config::DeviceConfig) -> Result<Self, DiscoveryError> {
         Ok(Self {
             vendor: normalize_id("vendor_id_hex", &device.vendor_id_hex)?,
             product: normalize_id("product_id_hex", &device.product_id_hex)?,
@@ -453,7 +451,7 @@ mod tests {
         let base = build_test_tree("id_override");
         let sysfs_hidraw_base = base.join("class/hidraw");
         let dev_dir = base.join("dev");
-        let ids = DeviceIds::from_config(&crate::utils::config::DeviceConfig {
+        let ids = DeviceIds::from_config(&crate::config::DeviceConfig {
             vendor_id_hex: "046D".into(),
             product_id_hex: "0xc52b".into(),
         })
@@ -470,7 +468,7 @@ mod tests {
     #[test]
     fn rejects_malformed_device_ids() {
         for bad in ["", "1de", "1de1f", "zzzz"] {
-            let result = DeviceIds::from_config(&crate::utils::config::DeviceConfig {
+            let result = DeviceIds::from_config(&crate::config::DeviceConfig {
                 vendor_id_hex: bad.into(),
                 product_id_hex: "f201".into(),
             });

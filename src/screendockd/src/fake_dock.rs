@@ -21,9 +21,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::framing::{frame_message, PictureSize, ReportId, REPORT_SIZE};
 use crate::hidraw_io::HidrawHandle;
-use crate::session::InboundAssembler;
+use crate::protocol::framing::{frame_message, PictureSize, ReportId, REPORT_SIZE};
+use crate::protocol::inbound::InboundAssembler;
 
 /// What the fake answers to `notify-projection-started`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

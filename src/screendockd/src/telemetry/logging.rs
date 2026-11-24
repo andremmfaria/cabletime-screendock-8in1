@@ -26,7 +26,7 @@
 
 use tracing_subscriber::EnvFilter;
 
-use super::config::Config;
+use crate::config::Config;
 
 /// Environment variable `tracing-subscriber`'s `EnvFilter` reads for a level override — the
 /// same `RUST_LOG` convention `log`/`env_logger` users already expect, so this isn't a new
@@ -58,9 +58,7 @@ pub fn init_logging(config: &Config) -> Result<(), Box<dyn std::error::Error + S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::config::{
-        CaptureConfig, DaemonConfig, DeviceConfig, DisplayConfig, EncodeConfig,
-    };
+    use crate::config::{CaptureConfig, DaemonConfig, DeviceConfig, DisplayConfig, EncodeConfig};
 
     fn test_config(log_level: &str) -> Config {
         Config {

@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 
 use screendockd::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::daemon::{run, DaemonParams, DaemonReport};
-use screendockd::display::{DisplayGeometry, Orientation};
 use screendockd::encode::prerecorded::PrerecordedEncoder;
 use screendockd::encode::EncoderSettings;
 use screendockd::fake_dock::{FakeDock, FakeDockConfig};
+use screendockd::protocol::display::{DisplayGeometry, Orientation};
 use screendockd::session::SessionSettings;
 
 struct Solid;
@@ -35,7 +35,7 @@ fn encoder() -> PrerecordedEncoder {
         fps: 25,
         keyframe_interval: 3,
         bitrate_kbps: 1000,
-        preset: screendockd::utils::config::X264Preset::Ultrafast,
+        preset: screendockd::config::X264Preset::Ultrafast,
         zerolatency: true,
         vbv_buffer_ms: 200,
     };

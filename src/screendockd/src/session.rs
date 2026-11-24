@@ -20,7 +20,7 @@
 //!   passthrough, and forwards the rest to the controller as [`DockEvent`]s;
 //! - controller: runs the handshake, then watches for loss and starts over.
 //!
-//! Mechanism/policy split: the `messages` module is policy (exact bytes of every host message),
+//! Mechanism/policy split: [`messages`] is policy (exact bytes of every host message),
 //! [`InboundAssembler`] and [`parse_dock_message`] are the parsing mechanism, and the
 //! controller sequences them. Timeouts are settings so tests run in milliseconds.
 //!
@@ -37,9 +37,11 @@ use serde_json::Value;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-use crate::framing::{MessageBuilder, PictureSize, ReportId, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE};
-use crate::heartbeat::{heartbeat_message, SessionId};
 use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId, FIRST_CHUNK_PAYLOAD_MAX};
+use crate::protocol::heartbeat::{heartbeat_message, SessionId};
+use crate::protocol::inbound::{parse_dock_message, DockMessage, InboundAssembler, LOG_TEXT_MAX};
+use crate::protocol::messages;
 
 /// How long to wait for the dock's ready announcement before deciding whether it already
 /// holds a session.
@@ -62,14 +64,8 @@ pub const DEFAULT_MAX_HEARTBEAT_FAILURES: u32 = 3;
 /// Longest single sleep or wait, so stop requests stay responsive.
 const POLL_SLICE: Duration = Duration::from_millis(50);
 
-/// Largest dock message the reader reassembles; anything bigger is dropped as malformed.
-const MAX_INBOUND_LEN: usize = 64 * 1024;
-
 /// A dock heartbeat counts as proof of life for this long.
 const DOCK_ALIVE_WINDOW: Duration = Duration::from_secs(3);
-
-/// Longest dock-supplied string (method names) written to the log.
-const LOG_TEXT_MAX: usize = 64;
 
 /// Errors from the session.
 #[derive(Debug, Error)]
@@ -104,62 +100,6 @@ pub enum SessionError {
     /// A session thread panicked.
     #[error("{0} thread panicked")]
     Panicked(&'static str),
-}
-
-/// Exact bytes of every host message on MI_00. Heartbeats live in `heartbeat.rs`.
-///
-/// Everything except the heartbeat is compact JSON with alphabetical keys, ending in one
-/// newline that is counted in the length field.
-pub mod messages {
-    use super::PictureSize;
-
-    /// Platform string the dock requires in `app-launched`.
-    pub const PLATFORM: &str = "windows";
-    /// Product type string the vendor driver sends.
-    pub const PRODUCT_TYPE: &str = "QuattroTx CT10";
-    /// Longest machine name sent, in characters.
-    pub const MACHINE_NAME_MAX: usize = 15;
-    /// Id of the EDID passthrough message the dock sends.
-    pub const EDID_PASSTHROUGH_ID: u64 = 101;
-
-    /// `notify-projection-stopped`.
-    pub const PROJECTION_STOPPED: &[u8] =
-        b"{\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-stopped\"}\n";
-
-    /// `app_tx_mouse_icon_change` with an empty cursor.
-    pub const MOUSE_ICON_CHANGE: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_mouse_icon_change\",\"params\":{\"cursor_base64_data\":\"\"}}\n";
-
-    /// The reply to the dock's EDID passthrough (id 101): passthrough id 103 with data `AQ==`.
-    pub const EDID_ACK: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n";
-
-    /// Uppercases a hostname and truncates it to 15 characters, as the vendor driver does for
-    /// `platform-machine-name`.
-    pub fn machine_name_from_hostname(hostname: &str) -> String {
-        hostname
-            .trim()
-            .to_uppercase()
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(MACHINE_NAME_MAX)
-            .collect()
-    }
-
-    /// `app-launched` request.
-    pub fn app_launched(id: u64, machine_name: &str, size: PictureSize) -> Vec<u8> {
-        // `to_string` on a `str` value cannot fail and escapes quotes and backslashes.
-        let name = serde_json::Value::from(machine_name).to_string();
-        format!(
-            "{{\"id\":{id},\"jsonrpc\":\"2.0\",\"method\":\"app-launched\",\"params\":{{\"platform\":\"{PLATFORM}\",\"platform-machine-name\":{name},\"product-type\":\"{PRODUCT_TYPE}\",\"res-height\":{},\"res-width\":{}}}}}\n",
-            size.height.0, size.width.0
-        )
-        .into_bytes()
-    }
-
-    /// `notify-projection-started` request.
-    pub fn projection_started(id: u64) -> Vec<u8> {
-        format!("{{\"id\":{id},\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-started\"}}\n")
-            .into_bytes()
-    }
 }
 
 /// The host's hostname, or an empty string when it can't be read.
@@ -264,112 +204,6 @@ impl SessionSettings {
     pub fn without_handshake(mut self) -> Self {
         self.handshake = false;
         self
-    }
-}
-
-/// A parsed message from the dock.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DockMessage {
-    /// `notify-app-accessories-are-ready`.
-    Ready,
-    /// The dock's heartbeat.
-    Heartbeat,
-    /// `common.data_passthrough` with the given params id.
-    Passthrough { id: Option<u64> },
-    /// A result or error for one of our requests.
-    Reply {
-        id: u64,
-        result: Option<Value>,
-        error: Option<Value>,
-    },
-    /// Any other notification (`tx-data-updated`, ...), with its truncated method name.
-    Other { method: String },
-    /// Text that isn't a JSON-RPC object this driver understands.
-    Unrecognized,
-}
-
-/// Parses the JSON text of one dock message.
-pub fn parse_dock_message(text: &[u8]) -> DockMessage {
-    let Ok(value) = serde_json::from_slice::<Value>(text) else {
-        return DockMessage::Unrecognized;
-    };
-    let Some(object) = value.as_object() else {
-        return DockMessage::Unrecognized;
-    };
-    if let Some(method) = object.get("method").and_then(Value::as_str) {
-        return match method {
-            "notify-app-accessories-are-ready" => DockMessage::Ready,
-            "heartbeat" => DockMessage::Heartbeat,
-            "common.data_passthrough" => DockMessage::Passthrough {
-                id: object
-                    .get("params")
-                    .and_then(|p| p.get("id"))
-                    .and_then(Value::as_u64),
-            },
-            other => DockMessage::Other {
-                method: other.chars().take(LOG_TEXT_MAX).collect(),
-            },
-        };
-    }
-    if let Some(id) = object.get("id").and_then(Value::as_u64) {
-        let result = object.get("result").cloned();
-        let error = object.get("error").cloned();
-        if result.is_some() || error.is_some() {
-            return DockMessage::Reply { id, result, error };
-        }
-    }
-    DockMessage::Unrecognized
-}
-
-/// Reassembles the dock's MI_00 reports into message texts.
-///
-/// Reports use the same layout the host writes: a 16-byte header with the big-endian payload
-/// length at bytes 1..4 on the first report, then payload from offset 16; continuation reports
-/// repeat the header with a zero length. The reader is lenient about the other header bytes,
-/// since the input is the dock's, but never trusts the length beyond [`MAX_INBOUND_LEN`].
-#[derive(Debug, Default)]
-pub struct InboundAssembler {
-    expected: usize,
-    buf: Vec<u8>,
-}
-
-impl InboundAssembler {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Feeds one report. Returns the complete message text when this report finishes one.
-    pub fn feed(&mut self, report: &[u8]) -> Option<Vec<u8>> {
-        if report.len() < HEADER_SIZE {
-            return None;
-        }
-        let announced = u32::from_be_bytes(report[1..5].try_into().ok()?) as usize;
-        let body = &report[HEADER_SIZE..];
-        if announced != 0 {
-            // A non-zero length always starts a new message, dropping any torn one.
-            if announced > MAX_INBOUND_LEN {
-                self.reset();
-                return None;
-            }
-            self.expected = announced;
-            self.buf.clear();
-        } else if self.expected == 0 {
-            return None;
-        }
-        let want = self.expected - self.buf.len();
-        let take = want.min(body.len()).min(FIRST_CHUNK_PAYLOAD_MAX);
-        self.buf.extend_from_slice(&body[..take]);
-        if self.buf.len() >= self.expected {
-            let message = std::mem::take(&mut self.buf);
-            self.expected = 0;
-            return Some(message);
-        }
-        None
-    }
-
-    fn reset(&mut self) {
-        self.expected = 0;
-        self.buf.clear();
     }
 }
 
@@ -1021,7 +855,6 @@ fn truncate(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::fake_dock::{FakeDock, FakeDockConfig, StartedReply};
-    use crate::framing::frame_message;
 
     fn size() -> PictureSize {
         PictureSize::new(1280, 720)
@@ -1082,122 +915,6 @@ mod tests {
                 "{\"id\":2,\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-started\"}\n",
             ]
         );
-    }
-
-    #[test]
-    fn first_report_bytes_match_the_reference_prototype() {
-        let hex =
-            |report: &[u8]| -> String { report[..64].iter().map(|b| format!("{b:02x}")).collect() };
-        let id = SessionId::new("25282281").unwrap();
-        assert_eq!(
-            hex(&heartbeat_message(&id)[0]),
-            "010000004e00000000000000000000007b226a736f6e727063223a22322e30222c20226d6574686f64223a2022686561727462656174222c2022706172616d73"
-        );
-        let launched = messages::app_launched(1, "VERMELHO", size());
-        let chunks = MessageBuilder::control().payload(&launched).build();
-        assert_eq!(
-            hex(&chunks[0]),
-            "01000000b600000000000000000000007b226964223a312c226a736f6e727063223a22322e30222c226d6574686f64223a226170702d6c61756e63686564222c"
-        );
-    }
-
-    #[test]
-    fn message_bytes_are_exact() {
-        assert_eq!(
-            messages::app_launched(1, "AZUL", PictureSize::new(1920, 1080)),
-            b"{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"app-launched\",\"params\":{\"platform\":\"windows\",\"platform-machine-name\":\"AZUL\",\"product-type\":\"QuattroTx CT10\",\"res-height\":1080,\"res-width\":1920}}\n"
-        );
-        assert_eq!(
-            messages::app_launched(3, "AZUL", size()).len(),
-            0xb2,
-            "captured length of the 1280x720 request"
-        );
-        assert_eq!(
-            messages::projection_started(4),
-            b"{\"id\":4,\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-started\"}\n"
-        );
-        assert_eq!(
-            messages::PROJECTION_STOPPED,
-            b"{\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-stopped\"}\n"
-        );
-        assert_eq!(
-            messages::MOUSE_ICON_CHANGE,
-            b"{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_mouse_icon_change\",\"params\":{\"cursor_base64_data\":\"\"}}\n"
-        );
-        assert_eq!(
-            messages::EDID_ACK,
-            b"{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n"
-        );
-    }
-
-    #[test]
-    fn machine_name_is_uppercase_and_truncated_to_15() {
-        assert_eq!(
-            messages::machine_name_from_hostname("vermelho\n"),
-            "VERMELHO"
-        );
-        assert_eq!(
-            messages::machine_name_from_hostname("a-very-long-hostname-indeed"),
-            "A-VERY-LONG-HOS"
-        );
-        let quoted = messages::app_launched(1, "A\"B", size());
-        assert!(serde_json::from_slice::<Value>(&quoted).is_ok());
-    }
-
-    #[test]
-    fn assembler_handles_single_and_multi_report_messages() {
-        let mut assembler = InboundAssembler::new();
-        let single = frame_message(ReportId::Control, PictureSize::zero(), b"{\"a\":1}");
-        assert_eq!(assembler.feed(&single[0]).unwrap(), b"{\"a\":1}");
-
-        let big: Vec<u8> = (0..9000).map(|i| b'a' + (i % 26) as u8).collect();
-        let chunks = frame_message(ReportId::Control, PictureSize::zero(), &big);
-        assert_eq!(chunks.len(), 3);
-        assert!(assembler.feed(&chunks[0]).is_none());
-        assert!(assembler.feed(&chunks[1]).is_none());
-        assert_eq!(assembler.feed(&chunks[2]).unwrap(), big);
-
-        // A stray continuation and an oversized announcement are dropped.
-        assert!(assembler.feed(&chunks[1]).is_none());
-        let mut huge = vec![0u8; 4096];
-        huge[0] = 1;
-        huge[1..5].copy_from_slice(&(10_000_000u32).to_be_bytes());
-        assert!(assembler.feed(&huge).is_none());
-        assert!(assembler.feed(&[1, 2, 3]).is_none());
-    }
-
-    #[test]
-    fn dock_messages_parse_by_kind() {
-        let ready = b"{\n\t\"jsonrpc\":\t\"2.0\",\n\t\"method\":\t\"notify-app-accessories-are-ready\",\n\t\"params\":\t{\n\t\t\"res-width\":\t1920\n\t},\n\t\"jrpcSeq\":\t7730\n}";
-        assert_eq!(parse_dock_message(ready), DockMessage::Ready);
-        assert_eq!(
-            parse_dock_message(br#"{"method":"heartbeat","params":{"session-id":"1"}}"#),
-            DockMessage::Heartbeat
-        );
-        assert_eq!(
-            parse_dock_message(br#"{"method":"common.data_passthrough","params":{"id":101,"size":258,"data":"AA=="}}"#),
-            DockMessage::Passthrough { id: Some(101) }
-        );
-        assert_eq!(
-            parse_dock_message(br#"{"id":4,"result":"isAllowed","jrpcSeq":7743}"#),
-            DockMessage::Reply {
-                id: 4,
-                result: Some(Value::String("isAllowed".into())),
-                error: None
-            }
-        );
-        assert!(matches!(
-            parse_dock_message(br#"{"id":4,"error":{"code":-32601}}"#),
-            DockMessage::Reply { error: Some(_), .. }
-        ));
-        assert_eq!(
-            parse_dock_message(br#"{"method":"tx-data-updated"}"#),
-            DockMessage::Other {
-                method: "tx-data-updated".into()
-            }
-        );
-        assert_eq!(parse_dock_message(b"not json"), DockMessage::Unrecognized);
-        assert_eq!(parse_dock_message(b"[1,2]"), DockMessage::Unrecognized);
     }
 
     #[test]
@@ -1310,7 +1027,7 @@ mod tests {
 
         assert_eq!(non_heartbeat(&dock), silent_sequence());
         let mut mi01 = mi01;
-        let chunks = crate::framing::MessageBuilder::video(size())
+        let chunks = crate::protocol::framing::MessageBuilder::video(size())
             .payload(&[0xAB; 5000])
             .build();
         for _ in 0..3 {

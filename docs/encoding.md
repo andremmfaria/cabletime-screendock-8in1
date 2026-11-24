@@ -11,7 +11,7 @@ Every encoder produces `VideoMessage` values (Annex-B bytes plus a keyframe flag
 - Access unit delimiters are dropped. A packet with no slice NAL unit yields no message.
 - Constrained Baseline profile, no B-frames, about 25 fps.
 
-A message is written to MI_01 through `framing::MessageBuilder::video`, which splits it into chunks; see [protocol-implementation.md](protocol-implementation.md).
+A message is written to MI_01 through `protocol::framing::MessageBuilder::video`, which splits it into chunks; see [protocol-implementation.md](protocol-implementation.md).
 
 ## The `Encoder` trait
 
@@ -51,7 +51,7 @@ Verification: `tests/encode_ffmpeg.rs` encodes a 30 frame synthetic sequence fro
 
 ## Resolution
 
-`display::DisplayGeometry` validates `display.width`, `display.height` and `display.orientation` and exposes the encode size and the header width and height. See [daemon.md](daemon.md#resolution).
+`protocol::display::DisplayGeometry` validates `display.width`, `display.height` and `display.orientation` and exposes the encode size and the header width and height. See [daemon.md](daemon.md#resolution).
 
 ## CPU measurement
 

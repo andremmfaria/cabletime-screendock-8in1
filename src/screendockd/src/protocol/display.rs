@@ -8,8 +8,8 @@
 
 use thiserror::Error;
 
-use crate::framing::{PictureSize, PixelHeight, PixelWidth};
-use crate::utils::config::DisplayConfig;
+use crate::config::DisplayConfig;
+use crate::protocol::framing::{PictureSize, PixelHeight, PixelWidth};
 
 /// Smallest accepted edge length in pixels (one H.264 macroblock).
 pub const MIN_DIMENSION: u32 = 16;

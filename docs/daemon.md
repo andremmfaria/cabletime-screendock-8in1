@@ -41,7 +41,7 @@ SIGINT and SIGTERM set a shared flag. The video loop checks it every frame and t
 
 ## Resolution
 
-`display::DisplayGeometry` is built from `display.width`, `display.height` and `display.orientation`. These are the encoded picture size exactly as written; orientation is a consistency check, not a rotation.
+`protocol::display::DisplayGeometry` is built from `display.width`, `display.height` and `display.orientation`. These are the encoded picture size exactly as written; orientation is a consistency check, not a rotation.
 
 | Rule | Value |
 |---|---|

@@ -117,7 +117,7 @@ impl SizeStats {
 /// HID reports needed for a message of `bytes` bytes (4080 payload bytes per report).
 pub fn reports_for(bytes: u64) -> u64 {
     bytes
-        .div_ceil(crate::framing::FIRST_CHUNK_PAYLOAD_MAX as u64)
+        .div_ceil(crate::protocol::framing::FIRST_CHUNK_PAYLOAD_MAX as u64)
         .max(1)
 }
 
@@ -243,9 +243,9 @@ pub fn run_bench(
 mod tests {
     use super::*;
     use crate::capture::{Frame, PixelFormat};
-    use crate::display::{DisplayGeometry, Orientation};
     use crate::encode::prerecorded::PrerecordedEncoder;
     use crate::encode::EncoderSettings;
+    use crate::protocol::display::{DisplayGeometry, Orientation};
 
     struct Paced;
     impl CaptureBackend for Paced {
@@ -265,7 +265,7 @@ mod tests {
             fps: 25,
             keyframe_interval: 2,
             bitrate_kbps: 1000,
-            preset: crate::utils::config::X264Preset::Ultrafast,
+            preset: crate::config::X264Preset::Ultrafast,
             zerolatency: true,
             vbv_buffer_ms: 200,
         };

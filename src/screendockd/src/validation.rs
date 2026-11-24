@@ -17,9 +17,10 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::framing::{MessageBuilder, PictureSize, ReportId};
-use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats, SessionId};
+use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
 use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
+use crate::protocol::heartbeat::SessionId;
 use crate::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
 
 /// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
@@ -526,7 +527,7 @@ pub fn run_isolate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::framing::parse_chunks;
+    use crate::protocol::framing::parse_chunks;
     use std::fs::{File, OpenOptions};
     use std::io::{Read, Seek, SeekFrom};
 

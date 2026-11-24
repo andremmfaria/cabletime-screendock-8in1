@@ -21,10 +21,10 @@ use thiserror::Error;
 use tracing::{debug, info, info_span, warn};
 
 use crate::capture::CaptureBackend;
-use crate::display::DisplayGeometry;
 use crate::encode::Encoder;
-use crate::framing::{MessageBuilder, ReportId};
 use crate::hidraw_io::HidrawHandle;
+use crate::protocol::display::DisplayGeometry;
+use crate::protocol::framing::{MessageBuilder, ReportId};
 use crate::session::{Session, SessionError, SessionHandle, SessionSettings};
 
 /// Consecutive failed frames after which the daemon gives up.
@@ -270,10 +270,10 @@ fn video_loop(
 mod tests {
     use super::*;
     use crate::capture::{CaptureError, Frame, PixelFormat};
-    use crate::display::Orientation;
     use crate::encode::prerecorded::PrerecordedEncoder;
     use crate::encode::EncoderSettings;
-    use crate::framing::{parse_chunks, PictureSize};
+    use crate::protocol::display::Orientation;
+    use crate::protocol::framing::{parse_chunks, PictureSize};
     use std::fs::OpenOptions;
     use std::io::{Read, Seek, SeekFrom};
 
@@ -305,7 +305,7 @@ mod tests {
             fps: 25,
             keyframe_interval: 2,
             bitrate_kbps: 1000,
-            preset: crate::utils::config::X264Preset::Ultrafast,
+            preset: crate::config::X264Preset::Ultrafast,
             zerolatency: true,
             vbv_buffer_ms: 200,
         };
@@ -380,7 +380,7 @@ mod tests {
 
         let mut hb = Vec::new();
         heartbeat_read.read_to_end(&mut hb).unwrap();
-        let first = parse_chunks(&[hb[..crate::framing::REPORT_SIZE].to_vec()]).unwrap();
+        let first = parse_chunks(&[hb[..crate::protocol::framing::REPORT_SIZE].to_vec()]).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&first.payload).unwrap();
         assert_eq!(value["method"], "heartbeat");
         assert!(value["params"]["session-id"]

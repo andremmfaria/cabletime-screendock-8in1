@@ -6,17 +6,16 @@
 //! wire framing, hidraw I/O, the MI_00 dock session (heartbeat, reader and handshake), the
 //! hardware validation routines, screen capture, H.264 encoding and the daemon loop.
 
-pub mod annexb;
 pub mod bench;
 pub mod capture;
+pub mod config;
 pub mod daemon;
 pub mod discovery;
-pub mod display;
 pub mod encode;
 pub mod fake_dock;
-pub mod framing;
 pub mod heartbeat;
 pub mod hidraw_io;
+pub mod protocol;
 pub mod session;
-pub mod utils;
+pub mod telemetry;
 pub mod validation;

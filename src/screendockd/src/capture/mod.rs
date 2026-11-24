@@ -14,7 +14,7 @@ use std::path::Path;
 
 use thiserror::Error;
 
-use crate::utils::config::{CaptureBackendChoice, Config};
+use crate::config::{CaptureBackendChoice, Config};
 
 /// Layout of the bytes in one pixel of a [`Frame`]. All supported layouts use four bytes per
 /// pixel; the name lists the byte order in memory.

@@ -13,12 +13,12 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use common::{require_xvfb, Painter, HEIGHT, WIDTH};
-use screendockd::annexb::messages_from_annexb;
-use screendockd::framing::{
+use screendockd::hidraw_io::HidrawHandle;
+use screendockd::protocol::annexb::messages_from_annexb;
+use screendockd::protocol::framing::{
     ParsedMessage, PictureSize, ReportId, CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX,
     REPORT_SIZE,
 };
-use screendockd::hidraw_io::HidrawHandle;
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.h264")

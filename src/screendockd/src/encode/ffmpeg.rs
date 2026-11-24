@@ -207,8 +207,8 @@ impl Encoder for FfmpegEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::display::{DisplayGeometry, Orientation};
-    use crate::utils::config::X264Preset;
+    use crate::config::X264Preset;
+    use crate::protocol::display::{DisplayGeometry, Orientation};
 
     fn settings(vbv_buffer_ms: u32) -> EncoderSettings {
         EncoderSettings {

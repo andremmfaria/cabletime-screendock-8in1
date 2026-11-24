@@ -1,7 +1,7 @@
 # Default/example configuration for screendockd.
 #
 # This file at the repo root is read directly when running out of a git checkout (see
-# src/screendockd/src/utils/config.rs's resolution order). It is also the packaged
+# src/screendockd/src/config/mod.rs's resolution order). It is also the packaged
 # default/template shipped by the .deb/.rpm build to /etc/screendockd/screendock_cfg.toml (see
 # src/screendockd/Cargo.toml's [package.metadata.deb]/[package.metadata.generate-rpm] asset
 # lists) — a package install can't pre-populate every future user's $XDG_CONFIG_HOME, so this
@@ -48,7 +48,7 @@ vbv_buffer_ms = 100
 [daemon]
 # Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via
 # the RUST_LOG environment variable, which takes precedence over this value (see
-# utils/logging.rs).
+# telemetry/logging.rs).
 log_level = "info"
 # Heartbeat tick interval for the MI_00 control channel, in milliseconds. The protocol spec
 # calls for roughly once per second.

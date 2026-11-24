@@ -11,7 +11,7 @@
 //! payload length (bytes 1..4), width (bytes 8..11) and height (bytes 12..15); continuation
 //! reports carry the Report ID followed by 15 zero bytes. Payload bytes start at offset 16.
 
-use screendockd::framing::{
+use screendockd::protocol::framing::{
     frame_message, parse_chunks, FramingError, MessageBuilder, PictureSize, ReportId,
     CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
 };

@@ -21,24 +21,27 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | Module | Role | Status |
 |---|---|---|
 | `discovery` | Resolves MI_00 and MI_01 hidraw paths from sysfs into the `Mi00Path` and `Mi01Path` newtypes, matching the vendor and product IDs in `DeviceIds` (the dock's by default, overridable from the `[device]` config) | Implemented, unit tested against a synthetic sysfs tree |
-| `framing` | Pure functions and types for the 16-byte header, chunking and parsing: `ReportId`, `PixelWidth`, `PixelHeight`, `PictureSize`, `FrameHeader`, `MessageBuilder`, `frame_message`, `parse_chunks` | Implemented, unit and integration tested |
+| `protocol::framing` | Pure functions and types for the 16-byte header, chunking and parsing: `ReportId`, `PixelWidth`, `PixelHeight`, `PictureSize`, `FrameHeader`, `MessageBuilder`, `frame_message`, `parse_chunks` | Implemented, unit and integration tested |
 | `hidraw_io` | `HidrawHandle`: owns one open node, writes chunks with `write(2)`, reads and parses messages, duplicates the descriptor (`try_clone`) and waits for readability with `poll(2)` (`wait_readable`) | Implemented, loopback tested. Requires on-device validation |
-| `heartbeat` | The `SessionId` newtype, the exact heartbeat text and a paced send loop on MI_00 |
-| `session` | The MI_00 dock session: `Session`, `SessionHandle`, `SessionState`, `SessionSettings`, exact host message bytes (`messages`), the dock message parser and the handshake state machine. See [protocol-implementation.md](protocol-implementation.md#session-handshake) |
+| `protocol::heartbeat` | The `SessionId` newtype and the exact heartbeat text | Implemented, unit tested |
+| `heartbeat` | `run_heartbeat_loop`: a paced send loop on MI_00 used by the validation tools | Implemented, loopback tested |
+| `protocol::messages` | Exact bytes of every host message on MI_00 other than the heartbeat | Implemented, unit tested |
+| `protocol::inbound` | `InboundAssembler` and `parse_dock_message`: reassembly and classification of the dock's MI_00 messages | Implemented, unit tested |
+| `session` | The MI_00 dock session: `Session`, `SessionHandle`, `SessionState`, `SessionSettings` and the handshake state machine. See [protocol-implementation.md](protocol-implementation.md#session-handshake) |
 | `fake_dock` | A simulated dock over Unix datagram socket pairs, used by session, daemon and validation tests. Not used by the daemon | Implemented, loopback tested. Requires on-device validation |
-| `annexb` | Splits an Annex-B H.264 stream into dock messages (keyframe bundle, single inter-frame NALs) | Implemented, unit tested |
+| `protocol::annexb` | Splits an Annex-B H.264 stream into dock messages (keyframe bundle, single inter-frame NALs) | Implemented, unit tested |
 | `validation` | Replay timing and heartbeat isolation routines used by the CLI. They run the dock session first when video is sent with an MI_00 handle | Implemented, loopback tested. Requires on-device validation |
-| `utils::config` | Loads the TOML config through a four step path resolution | Implemented |
-| `utils::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
+| `config` | Loads the TOML config through a four step path resolution | Implemented |
+| `telemetry::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
 | `encode` | `Encoder` trait, message policy (`messages_from_packet`), libx264 encoder (`encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
-| `display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
+| `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
 | `daemon` | The dock session plus the capture, encode, frame and write loop with the error policy; video is written only while the session is armed. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
 | `bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait, `create_backend` session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
 
 ## Layering rules
 
-- Mechanism and policy are separate. `hidraw_io` moves framed buffers and checks only that each chunk's Report ID matches the channel the handle was opened for. `framing`, `heartbeat` and `session::messages` define what messages mean and never touch a file descriptor.
+- Mechanism and policy are separate. `hidraw_io` moves framed buffers and checks only that each chunk's Report ID matches the channel the handle was opened for. `protocol::framing`, `protocol::heartbeat` and `protocol::messages` define what messages mean and never touch a file descriptor.
 - Domain values are newtypes: the two node paths cannot be swapped, a pixel width cannot be passed where a height is expected, and Report IDs are a closed enum.
 - Library modules return typed `thiserror` enums. `main.rs` is the application boundary and uses `anyhow` with context, so failures print a readable chain and exit nonzero.
 - Reads are parsed at the I/O boundary: `HidrawHandle::read_message` returns a `ParsedMessage`, never raw buffers.

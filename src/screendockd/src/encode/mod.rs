@@ -25,10 +25,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::annexb::{contains_idr, messages_from_annexb, AnnexBError};
 use crate::capture::Frame;
-use crate::display::DisplayGeometry;
-use crate::utils::config::{Config, X264Preset};
+use crate::config::{Config, X264Preset};
+use crate::protocol::annexb::{contains_idr, messages_from_annexb, AnnexBError};
+use crate::protocol::display::DisplayGeometry;
 
 /// Frame rate used when the config leaves pacing disabled (`capture.fps = 0`).
 pub const DEFAULT_FPS: u32 = 25;
@@ -184,7 +184,7 @@ pub fn messages_from_packet(packet: &[u8]) -> Result<Vec<VideoMessage>, EncodeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::annexb::split_nals;
+    use crate::protocol::annexb::split_nals;
 
     fn nal(ty: u8, len: usize) -> Vec<u8> {
         let mut v = vec![0, 0, 0, 1, 0x60 | ty];

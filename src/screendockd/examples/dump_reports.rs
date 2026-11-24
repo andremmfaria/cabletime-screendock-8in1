@@ -1,9 +1,9 @@
 //! Prints the first 64 bytes of the MI_00 heartbeat and app-launched reports as hex, for
 //! byte comparison against the reference prototype.
 
-use screendockd::framing::{MessageBuilder, PictureSize};
-use screendockd::heartbeat::{heartbeat_message, SessionId};
-use screendockd::session::messages;
+use screendockd::protocol::framing::{MessageBuilder, PictureSize};
+use screendockd::protocol::heartbeat::{heartbeat_message, SessionId};
+use screendockd::protocol::messages;
 
 fn hex(report: &[u8]) -> String {
     report[..64].iter().map(|b| format!("{b:02x}")).collect()
