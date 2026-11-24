@@ -85,10 +85,17 @@ fn fresh_dock_handshake_precedes_video_and_header_layout_is_exact() {
     assert_eq!(report.frames_sent, 8);
     assert_eq!(report.handshakes, 1);
 
-    let texts = non_heartbeat(&dock);
-    assert_eq!(texts.len(), 5, "{texts:?}");
+    // Passthrough 103 goes out twice: the reader answers the dock's EDID, the handshake
+    // sends its own. Their position relative to the other messages is not fixed.
+    let all = non_heartbeat(&dock);
+    assert_eq!(all.len(), 6, "{all:?}");
+    let texts: Vec<String> = all
+        .into_iter()
+        .filter(|t| !t.contains("data_passthrough"))
+        .collect();
+    assert_eq!(texts.len(), 4, "{texts:?}");
     assert!(texts[1].contains("\"app-launched\"") && texts[1].contains("\"id\":1,"));
-    assert!(texts[4].contains("\"notify-projection-started\"") && texts[4].contains("\"id\":2,"));
+    assert!(texts[3].contains("\"notify-projection-started\"") && texts[3].contains("\"id\":2,"));
 
     // Give the fake a moment to drain the socket, then check what reached MI_01.
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -123,7 +130,11 @@ fn dock_holding_a_session_gets_video_after_the_bounded_wait() {
     .unwrap();
     assert!(started.elapsed() >= Duration::from_millis(350));
     assert_eq!(report.frames_sent, 5);
-    assert!(non_heartbeat(&dock).is_empty());
+    assert_eq!(
+        non_heartbeat(&dock).len(),
+        4,
+        "full sequence without stopped"
+    );
     assert!(report.dock_heartbeats_seen > 0);
     let deadline = Instant::now() + Duration::from_secs(2);
     while dock.video_stats().messages < 5 && Instant::now() < deadline {
@@ -151,12 +162,25 @@ fn fully_silent_dock_gets_video_in_assumed_active() {
     .unwrap();
     assert_eq!(report.frames_sent, 5);
     assert_eq!(report.dock_heartbeats_seen, 0);
-    assert!(non_heartbeat(&dock).is_empty());
     let deadline = Instant::now() + Duration::from_secs(2);
     while dock.video_stats().messages < 5 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(dock.video_stats().messages, 5);
+
+    // The silent path still sends app-launched, cursor, passthrough 103 and
+    // projection-started, in that order, all before the first video report.
+    let texts = non_heartbeat(&dock);
+    assert_eq!(texts.len(), 4, "{texts:?}");
+    assert!(texts[0].contains("\"app-launched\"") && texts[0].contains("\"id\":1,"));
+    assert!(texts[1].contains("app_tx_mouse_icon_change"));
+    assert!(texts[2].contains("common.data_passthrough") && texts[2].contains("\"id\":103"));
+    assert!(texts[3].contains("\"notify-projection-started\"") && texts[3].contains("\"id\":2,"));
+    assert!(!texts
+        .iter()
+        .any(|t| t.contains("notify-projection-stopped")));
+    let beats_and_control = dock.video_stats().control_messages_before_video.unwrap();
+    assert!(beats_and_control >= 4);
 }
 
 #[test]

@@ -4,10 +4,11 @@
 //! The dock discards every video frame, silently, until three things have happened: the host
 //! sent `app-launched` (a request with an id and a `platform`), the host sent
 //! `notify-projection-started` (a request with an id), and the dock answered `isAllowed`. A
-//! dock that already holds a projection session from an earlier host process answers none of
-//! these requests, yet accepts video. The state machine therefore bounds every wait and falls
-//! back to [`SessionState::AssumedActive`] when the ready announcement or a reply does not
-//! arrive, whether or not the dock sent anything at all (a session-holding dock often echoes no
+//! dock that already holds a projection session from an earlier host process announces and
+//! answers nothing, yet processes these messages and then renders video. The state machine
+//! therefore always sends the full message sequence, bounds every wait, and arms as
+//! [`SessionState::AssumedActive`] when the ready announcement or a reply does not arrive,
+//! whether or not the dock sent anything at all (a session-holding dock often echoes no
 //! heartbeat either). Video is never blocked on dock replies. The controller keeps watching in
 //! the armed states: if the dock announces `notify-app-accessories-are-ready` (it holds no
 //! session), or heartbeat or video writes keep failing, the session is lost and the full
@@ -44,9 +45,9 @@ use crate::hidraw_io::{HidrawHandle, HidrawIoError};
 /// holds a session.
 pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// How long to wait for the result of one request (`app-launched`, `notify-projection-started`).
-/// The dock took up to about 2 s to answer `app-launched` in captures.
-pub const DEFAULT_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+/// Longest wait for the result of one request (`app-launched`, `notify-projection-started`).
+/// The handshake continues when it expires.
+pub const DEFAULT_REPLY_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// Pause between `isAllowed` and the first video report, matching the 0.7 to 1.1 s the vendor
 /// driver leaves for its first keyframe.
@@ -848,9 +849,15 @@ impl Controller {
         while self.events.try_recv().is_ok() {}
     }
 
-    /// Waits for the reply to request `id`. `None` means the wait timed out, so the caller
-    /// proceeds as if the dock already held a session.
-    fn wait_reply(&self, request: &'static str, id: u64) -> Result<Option<Value>, HandshakeEnd> {
+    /// Waits up to the reply timeout for the reply to request `id`. `None` means nothing
+    /// arrived in time; the caller proceeds regardless because the dock acts on the request
+    /// even when its reply is not delivered. With `strict` an error reply fails the attempt.
+    fn wait_reply(
+        &self,
+        request: &'static str,
+        id: u64,
+        strict: bool,
+    ) -> Result<Option<Value>, HandshakeEnd> {
         let timeout = self.settings.reply_timeout;
         let reply = self.wait_event(timeout, |event| match event {
             DockEvent::Reply {
@@ -863,10 +870,14 @@ impl Controller {
         match reply {
             Wait::Got((result, error)) => {
                 if let Some(error) = error {
-                    return Err(HandshakeEnd::Failed(SessionError::Rejected {
-                        request,
-                        detail: truncate(&error.to_string()),
-                    }));
+                    if strict {
+                        return Err(HandshakeEnd::Failed(SessionError::Rejected {
+                            request,
+                            detail: truncate(&error.to_string()),
+                        }));
+                    }
+                    warn!(request, error = %truncate(&error.to_string()), "dock rejected a request on the silent path, continuing");
+                    return Ok(None);
                 }
                 Ok(Some(result.unwrap_or(Value::Null)))
             }
@@ -875,7 +886,7 @@ impl Controller {
                     request,
                     ?timeout,
                     dock_alive = self.shared.dock_alive(),
-                    "no answer from the dock, assuming it already holds a session"
+                    "no answer from the dock, continuing"
                 );
                 Ok(None)
             }
@@ -883,6 +894,11 @@ impl Controller {
     }
 
     /// Runs one handshake and returns the armed state to enter.
+    ///
+    /// The full message sequence is sent whether or not the dock announced ready or answers:
+    /// a dock that announces nothing still processes the messages. Replies are waited for
+    /// only within the reply timeout. `Active` needs the ready announcement and `isAllowed`;
+    /// every other outcome arms as `AssumedActive` after the settle delay.
     fn handshake(&mut self) -> Result<SessionState, HandshakeEnd> {
         self.drain_events();
         self.shared.set_state(SessionState::WaitingForReady);
@@ -894,16 +910,16 @@ impl Controller {
                 matches!(e, DockEvent::Ready).then_some(())
             })?
         };
-        if matches!(ready, Wait::TimedOut) {
+        let ready_seen = matches!(ready, Wait::Got(()));
+        if !ready_seen {
             warn!(
                 ?ready_timeout,
                 dock_alive = self.shared.dock_alive(),
-                "dock did not announce ready, assuming it already holds a session"
+                "dock did not announce ready, sending the handshake anyway"
             );
-            return Ok(SessionState::AssumedActive);
         }
 
-        if self.settings.send_stopped {
+        if ready_seen && self.settings.send_stopped {
             self.send(messages::PROJECTION_STOPPED)?;
         }
         let launch_id = self.next_id();
@@ -913,29 +929,35 @@ impl Controller {
             &self.settings.machine_name,
             self.settings.size,
         ))?;
-        if self.wait_reply("app-launched", launch_id)?.is_none() {
-            return Ok(SessionState::AssumedActive);
-        }
+        let mut confirmed = self
+            .wait_reply("app-launched", launch_id, ready_seen)?
+            .is_some();
 
         self.send(messages::MOUSE_ICON_CHANGE)?;
+        self.send(messages::EDID_ACK)?;
         let start_id = self.next_id();
         self.shared.set_state(SessionState::ProjectionStartedSent);
         self.send(&messages::projection_started(start_id))?;
-        match self.wait_reply("notify-projection-started", start_id)? {
-            None => return Ok(SessionState::AssumedActive),
+        match self.wait_reply("notify-projection-started", start_id, ready_seen)? {
+            None => confirmed = false,
             Some(Value::String(s)) if s == "isAllowed" => {}
-            Some(other) => {
+            Some(other) if ready_seen => {
                 return Err(HandshakeEnd::Failed(SessionError::Denied(truncate(
                     &other.to_string(),
                 ))))
             }
+            Some(_) => confirmed = false,
         }
 
         self.shared.set_state(SessionState::Settling);
         if !sleep_until(Instant::now() + self.settings.settle_delay, &self.shared) {
             return Err(HandshakeEnd::Stopped);
         }
-        Ok(SessionState::Active)
+        Ok(if ready_seen && confirmed {
+            SessionState::Active
+        } else {
+            SessionState::AssumedActive
+        })
     }
 
     /// Watches an armed session. Returns the loss reason, or `None` when shut down or the
@@ -1026,6 +1048,57 @@ mod tests {
 
     fn texts(dock: &FakeDock) -> Vec<String> {
         dock.host_texts()
+    }
+
+    fn non_heartbeat(dock: &FakeDock) -> Vec<String> {
+        texts(dock)
+            .into_iter()
+            .filter(|t| !t.contains("\"heartbeat\""))
+            .collect()
+    }
+
+    /// What a silent dock must receive, in order: no projection-stopped, since the dock never
+    /// announced ready.
+    fn silent_sequence() -> Vec<String> {
+        [
+            messages::app_launched(1, "VERMELHO", size()),
+            messages::MOUSE_ICON_CHANGE.to_vec(),
+            messages::EDID_ACK.to_vec(),
+            messages::projection_started(2),
+        ]
+        .into_iter()
+        .map(|m| String::from_utf8(m).unwrap())
+        .collect()
+    }
+
+    #[test]
+    fn silent_sequence_has_the_exact_vendor_bytes() {
+        assert_eq!(
+            silent_sequence(),
+            [
+                "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"app-launched\",\"params\":{\"platform\":\"windows\",\"platform-machine-name\":\"VERMELHO\",\"product-type\":\"QuattroTx CT10\",\"res-height\":720,\"res-width\":1280}}\n",
+                "{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_mouse_icon_change\",\"params\":{\"cursor_base64_data\":\"\"}}\n",
+                "{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n",
+                "{\"id\":2,\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-started\"}\n",
+            ]
+        );
+    }
+
+    #[test]
+    fn first_report_bytes_match_the_reference_prototype() {
+        let hex =
+            |report: &[u8]| -> String { report[..64].iter().map(|b| format!("{b:02x}")).collect() };
+        let id = SessionId::new("25282281").unwrap();
+        assert_eq!(
+            hex(&heartbeat_message(&id)[0]),
+            "010000004e00000000000000000000007b226a736f6e727063223a22322e30222c20226d6574686f64223a2022686561727462656174222c2022706172616d73"
+        );
+        let launched = messages::app_launched(1, "VERMELHO", size());
+        let chunks = MessageBuilder::control().payload(&launched).build();
+        assert_eq!(
+            hex(&chunks[0]),
+            "01000000b600000000000000000000007b226964223a312c226a736f6e727063223a22322e30222c226d6574686f64223a226170702d6c61756e63686564222c"
+        );
     }
 
     #[test]
@@ -1136,16 +1209,26 @@ mod tests {
         wait_for("armed", Duration::from_secs(5), || handle.is_armed());
         assert_eq!(handle.state(), SessionState::Active);
 
-        let sent: Vec<String> = texts(&dock)
+        // The passthrough answer goes out once from the reader (reply to the dock's EDID) and
+        // once from the handshake; their relative order is not fixed.
+        let all: Vec<String> = texts(&dock)
             .into_iter()
             .filter(|t| !t.contains("\"heartbeat\""))
+            .collect();
+        let passthroughs = all
+            .iter()
+            .filter(|t| t.contains("data_passthrough"))
+            .count();
+        assert_eq!(passthroughs, 2);
+        let sent: Vec<String> = all
+            .into_iter()
+            .filter(|t| !t.contains("data_passthrough"))
             .collect();
         assert_eq!(
             sent,
             [
                 "{\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-stopped\"}\n",
                 "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"app-launched\",\"params\":{\"platform\":\"windows\",\"platform-machine-name\":\"VERMELHO\",\"product-type\":\"QuattroTx CT10\",\"res-height\":720,\"res-width\":1280}}\n",
-                "{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n",
                 "{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_mouse_icon_change\",\"params\":{\"cursor_base64_data\":\"\"}}\n",
                 "{\"id\":2,\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-started\"}\n",
             ]
@@ -1197,14 +1280,7 @@ mod tests {
             started.elapsed() >= Duration::from_millis(350),
             "waited the ready timeout"
         );
-        let non_hb: Vec<String> = texts(&dock)
-            .into_iter()
-            .filter(|t| !t.contains("\"heartbeat\""))
-            .collect();
-        assert!(
-            non_hb.is_empty(),
-            "nothing but heartbeats is sent: {non_hb:?}"
-        );
+        assert_eq!(non_heartbeat(&dock), silent_sequence());
         session.shutdown().unwrap();
     }
 
@@ -1232,6 +1308,7 @@ mod tests {
         assert_eq!(handle.state(), SessionState::AssumedActive);
         assert_eq!(handle.generation(), 1);
 
+        assert_eq!(non_heartbeat(&dock), silent_sequence());
         let mut mi01 = mi01;
         let chunks = crate::framing::MessageBuilder::video(size())
             .payload(&[0xAB; 5000])
@@ -1245,12 +1322,10 @@ mod tests {
         let video = dock.video_stats();
         assert_eq!(video.reports_before_sink, 0);
         assert_eq!(video.layout_violations, 0);
-        // Heartbeats keep going while the dock stays silent.
-        let non_hb = texts(&dock)
-            .into_iter()
-            .filter(|t| !t.contains("\"heartbeat\""))
-            .count();
-        assert_eq!(non_hb, 0);
+        // The handshake messages all precede the first video report; nothing else follows.
+        assert_eq!(non_heartbeat(&dock), silent_sequence());
+        let before = video.control_messages_before_video.unwrap();
+        assert!(before >= 4);
         let stats = session.shutdown().unwrap();
         assert_eq!(stats.handshakes, 1);
         assert_eq!(stats.dock_heartbeats_seen, 0);
@@ -1280,7 +1355,8 @@ mod tests {
             .iter()
             .filter(|t| t.contains("\"app-launched\""))
             .count();
-        assert_eq!(launches, 1);
+        // One from the silent first attempt, one after the dock announced ready.
+        assert_eq!(launches, 2);
         assert!(dock.sink_started());
         let stats = session.shutdown().unwrap();
         assert_eq!(stats.handshakes, 2);

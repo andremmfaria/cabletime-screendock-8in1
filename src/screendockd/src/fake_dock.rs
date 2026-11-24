@@ -92,6 +92,9 @@ pub struct VideoStats {
     pub layout_violations: u64,
     /// Width and height of the first video message.
     pub first_size: Option<(u32, u32)>,
+    /// Number of complete host control messages (heartbeats included) logged when the first
+    /// video report arrived.
+    pub control_messages_before_video: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -455,6 +458,11 @@ fn drain_video(video: &UnixDatagram, state: &mut DockState, buf: &mut [u8]) {
     while let Ok(n) = video.recv(buf) {
         let report = &buf[..n];
         state.video.reports += 1;
+        let logged = state.host_log.len();
+        state
+            .video
+            .control_messages_before_video
+            .get_or_insert(logged);
         if n < 16 {
             state.video.layout_violations += 1;
             continue;

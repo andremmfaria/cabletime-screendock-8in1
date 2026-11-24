@@ -26,7 +26,7 @@ Startup is fail fast. In this order, any failure prints the error chain and exit
 
 ## Loops
 
-- Session threads, owned by `session::Session`: a heartbeat thread that sends one heartbeat on MI_00 every `daemon.heartbeat_interval_ms` against fixed deadlines, independent of video writes; a reader thread that drains and parses the dock's MI_00 reports and answers its EDID passthrough; and a controller thread that runs the handshake and redoes it when the session is lost. See [protocol-implementation.md](protocol-implementation.md#session-handshake).
+- Session threads, owned by `session::Session`: a heartbeat thread that sends one heartbeat on MI_00 every `daemon.heartbeat_interval_ms` against fixed deadlines, independent of video writes; a reader thread that drains and parses the dock's MI_00 reports and answers its EDID passthrough; and a controller thread that runs the handshake and redoes it when the session is lost. When the dock is silent (no ready announcement, no replies) the controller still sends `app-launched`, the cursor message, passthrough id 103 and `notify-projection-started`, waits the 0.8 s settle delay and arms video in `AssumedActive`. See [protocol-implementation.md](protocol-implementation.md#session-handshake).
 - Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (width and height from the display geometry), then one `write(2)` per report back to back. While the session is not armed the loop captures and writes nothing. When the session becomes armed again after a loss, the encoder is asked for a keyframe.
 
 ## Errors after startup
