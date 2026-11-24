@@ -34,7 +34,7 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 
 use crate::framing::{MessageBuilder, PictureSize, ReportId, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE};
-use crate::heartbeat::{heartbeat_message, SessionId, DEFAULT_HEARTBEAT_INTERVAL};
+use crate::heartbeat::{heartbeat_message, SessionId};
 use crate::hidraw_io::{HidrawHandle, HidrawIoError};
 
 /// How long to wait for the dock's ready announcement before deciding whether it already
@@ -269,11 +269,6 @@ impl SessionSettings {
     pub fn without_handshake(mut self) -> Self {
         self.handshake = false;
         self
-    }
-
-    /// Default heartbeat interval variant of [`SessionSettings::new`].
-    pub fn with_defaults(size: PictureSize) -> Self {
-        Self::new(size, DEFAULT_HEARTBEAT_INTERVAL)
     }
 }
 

@@ -3,8 +3,8 @@
 //! Exposed as a library (in addition to the `screendockd` binary) so integration tests under
 //! `tests/` can exercise individual modules directly. See `docs/implementation-plan.md` for the
 //! overall architecture and milestone breakdown; this crate implements device discovery, HID
-//! wire framing, hidraw I/O, the heartbeat, the hardware validation routines and screen capture;
-//! encode is still a typed stub.
+//! wire framing, hidraw I/O, the MI_00 dock session (heartbeat, reader and handshake), the
+//! hardware validation routines, screen capture, H.264 encoding and the daemon loop.
 
 pub mod annexb;
 pub mod bench;
