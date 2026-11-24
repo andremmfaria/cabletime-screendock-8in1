@@ -305,6 +305,9 @@ mod tests {
             fps: 25,
             keyframe_interval: 2,
             bitrate_kbps: 1000,
+            preset: crate::utils::config::X264Preset::Ultrafast,
+            zerolatency: true,
+            vbv_buffer_ms: 200,
         };
         let big = vec![0xAB; 9000];
         let mut key = vec![0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68, 2, 0, 0, 0, 1, 0x65];

@@ -18,8 +18,11 @@ The command line option `--config PATH` bypasses this order and loads that file 
 | `display.width` | integer | 1280 | Encoded picture width in pixels; written into the header of every video message and used as the encoder output width. Passed to the Wayland backend as the preferred stream width. Overridable per run with `--width` for `replay` and `isolate`. Even, 16 to 4096 |
 | `display.height` | integer | 720 | Encoded picture height in pixels; the header height of every video message, the encoder output height and the Wayland preferred stream height. Even, 16 to 4096 |
 | `display.orientation` | string | `landscape` | `landscape` (width at least height) or `portrait` (height at least width). Checked against the size; not a rotation. See [daemon.md](daemon.md#resolution) |
-| `encode.bitrate_kbps` | integer | 4000 | libx264 target bit rate in kilobits per second |
+| `encode.preset` | string | `ultrafast` | libx264 preset: `ultrafast`, `superfast`, `veryfast`, `faster`, `fast` or `medium`; any other value is a config error |
+| `encode.tune_zerolatency` | boolean | true | Apply the libx264 `zerolatency` tune |
+| `encode.bitrate_kbps` | integer | 4000 | libx264 target bit rate in kilobits per second; also the VBV maximum rate |
 | `encode.keyframe_interval` | integer | 50 | Frames between keyframes |
+| `encode.vbv_buffer_ms` | integer | 100 | VBV buffer in milliseconds of `encode.bitrate_kbps` (100 at 4000 gives 400 kbit); bounds the size of any one frame; 0 turns the cap off |
 | `capture.backend` | string | `auto` | `auto`, `x11` or `wayland`. `auto` follows the detected session (`$XDG_SESSION_TYPE`, then `$WAYLAND_DISPLAY`, then `$DISPLAY`). `wayland` needs a build with the `capture-wayland` feature |
 | `capture.x11_display` | string | unset | X11 display to capture, for example `:0`. Unset uses `$DISPLAY` |
 | `capture.fps` | integer | 25 | Capture frame rate. 0 captures as fast as the backend allows |

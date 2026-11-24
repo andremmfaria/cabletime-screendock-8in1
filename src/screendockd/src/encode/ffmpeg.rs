@@ -49,6 +49,26 @@ fn pixel_for(format: PixelFormat) -> Pixel {
     }
 }
 
+/// The `x264-params` string for the settings. The VBV cap (`vbv-maxrate` equal to the target
+/// rate, `vbv-bufsize` of `vbv_buffer_ms` at that rate, both in kilobits) bounds every frame,
+/// so a keyframe cannot grow far beyond the buffer.
+fn x264_params(settings: &EncoderSettings) -> String {
+    let mut params = format!(
+        "bframes=0:slices=1:sliced-threads=0:threads=1:aud=0:repeat-headers=1:\
+         keyint={0}:min-keyint={0}:scenecut=0",
+        settings.keyframe_interval
+    );
+    if settings.vbv_buffer_ms > 0 {
+        let bufsize =
+            (u64::from(settings.bitrate_kbps) * u64::from(settings.vbv_buffer_ms) / 1000).max(1);
+        params.push_str(&format!(
+            ":vbv-maxrate={}:vbv-bufsize={bufsize}",
+            settings.bitrate_kbps
+        ));
+    }
+    params
+}
+
 impl FfmpegEncoder {
     /// Opens libx264 for the settings' geometry and frame rate.
     pub fn new(settings: EncoderSettings) -> Result<Self, EncodeError> {
@@ -74,17 +94,13 @@ impl FfmpegEncoder {
         video.set_bit_rate(settings.bitrate_kbps as usize * 1000);
 
         let mut options = Dictionary::new();
-        options.set("preset", "ultrafast");
-        options.set("tune", "zerolatency");
+        options.set("preset", settings.preset.as_str());
+        if settings.zerolatency {
+            options.set("tune", "zerolatency");
+        }
         options.set("profile", "baseline");
-        options.set(
-            "x264-params",
-            &format!(
-                "bframes=0:slices=1:sliced-threads=0:threads=1:aud=0:repeat-headers=1:\
-                 forced-idr=1:keyint={0}:min-keyint={0}:scenecut=0",
-                settings.keyframe_interval
-            ),
-        );
+        options.set("forced-idr", "1");
+        options.set("x264-params", &x264_params(&settings));
         let encoder = video.open_with(options).map_err(setup_err)?;
 
         Ok(Self {
@@ -185,5 +201,36 @@ impl Encoder for FfmpegEncoder {
 
     fn request_keyframe(&mut self) {
         self.force_keyframe = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::display::{DisplayGeometry, Orientation};
+    use crate::utils::config::X264Preset;
+
+    fn settings(vbv_buffer_ms: u32) -> EncoderSettings {
+        EncoderSettings {
+            geometry: DisplayGeometry::new(1280, 720, Orientation::Landscape).unwrap(),
+            fps: 25,
+            keyframe_interval: 50,
+            bitrate_kbps: 4000,
+            preset: X264Preset::Ultrafast,
+            zerolatency: true,
+            vbv_buffer_ms,
+        }
+    }
+
+    #[test]
+    fn vbv_cap_follows_rate_and_buffer_time() {
+        let params = x264_params(&settings(100));
+        assert!(
+            params.contains("vbv-maxrate=4000:vbv-bufsize=400"),
+            "{params}"
+        );
+        assert!(params.contains("keyint=50:min-keyint=50"));
+        assert!(!params.contains("forced-idr"));
+        assert!(!x264_params(&settings(0)).contains("vbv"));
     }
 }

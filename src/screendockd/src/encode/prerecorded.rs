@@ -66,6 +66,9 @@ mod tests {
             fps: 25,
             keyframe_interval: 10,
             bitrate_kbps: 1000,
+            preset: crate::utils::config::X264Preset::Ultrafast,
+            zerolatency: true,
+            vbv_buffer_ms: 200,
         }
     }
 

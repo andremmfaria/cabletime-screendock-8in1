@@ -121,21 +121,57 @@ impl Default for CaptureConfig {
     }
 }
 
+/// libx264 speed preset. Slower presets spend more CPU for better quality at one bit rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum X264Preset {
+    Ultrafast,
+    Superfast,
+    Veryfast,
+    Faster,
+    Fast,
+    Medium,
+}
+
+impl X264Preset {
+    /// The name libx264 knows the preset by.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ultrafast => "ultrafast",
+            Self::Superfast => "superfast",
+            Self::Veryfast => "veryfast",
+            Self::Faster => "faster",
+            Self::Fast => "fast",
+            Self::Medium => "medium",
+        }
+    }
+}
+
 /// H.264 encoder settings. Every field is optional in the file.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct EncodeConfig {
-    /// Target bit rate in kilobits per second.
+    /// libx264 preset.
+    pub preset: X264Preset,
+    /// Apply libx264's `zerolatency` tune (no lookahead, no frame delay).
+    pub tune_zerolatency: bool,
+    /// Target bit rate in kilobits per second. It is also the VBV maximum rate.
     pub bitrate_kbps: u32,
     /// Frames between keyframes.
     pub keyframe_interval: u32,
+    /// VBV buffer size in milliseconds of `bitrate_kbps`. It bounds how large one frame can
+    /// get, keyframes included. 0 turns the VBV cap off.
+    pub vbv_buffer_ms: u32,
 }
 
 impl Default for EncodeConfig {
     fn default() -> Self {
         Self {
+            preset: X264Preset::Ultrafast,
+            tune_zerolatency: true,
             bitrate_kbps: 4000,
             keyframe_interval: 50,
+            vbv_buffer_ms: 100,
         }
     }
 }
@@ -333,5 +369,38 @@ mod tests {
             ConfigError::Unreadable { .. } => {}
             other => panic!("expected Unreadable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn encode_section_accepts_the_tuning_knobs_and_rejects_unknown_presets() {
+        let full = r#"
+[display]
+width = 1280
+height = 720
+orientation = "landscape"
+[capture]
+backend = "auto"
+fps = 25
+[daemon]
+log_level = "info"
+heartbeat_interval_ms = 1000
+[device]
+vendor_id_hex = "1de1"
+product_id_hex = "f201"
+[encode]
+preset = "veryfast"
+tune_zerolatency = false
+bitrate_kbps = 2500
+keyframe_interval = 25
+vbv_buffer_ms = 0
+"#;
+        let config: Config = toml::from_str(full).unwrap();
+        assert_eq!(config.encode.preset, X264Preset::Veryfast);
+        assert!(!config.encode.tune_zerolatency);
+        assert_eq!(config.encode.bitrate_kbps, 2500);
+        assert_eq!(config.encode.keyframe_interval, 25);
+        assert_eq!(config.encode.vbv_buffer_ms, 0);
+        let bad = full.replace("veryfast", "turbo");
+        assert!(toml::from_str::<Config>(&bad).is_err());
     }
 }

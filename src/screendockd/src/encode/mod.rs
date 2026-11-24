@@ -28,7 +28,7 @@ use thiserror::Error;
 use crate::annexb::{contains_idr, messages_from_annexb, AnnexBError};
 use crate::capture::Frame;
 use crate::display::DisplayGeometry;
-use crate::utils::config::Config;
+use crate::utils::config::{Config, X264Preset};
 
 /// Frame rate used when the config leaves pacing disabled (`capture.fps = 0`).
 pub const DEFAULT_FPS: u32 = 25;
@@ -99,8 +99,14 @@ pub struct EncoderSettings {
     pub fps: u32,
     /// Frames between keyframes.
     pub keyframe_interval: u32,
-    /// Target bit rate in kilobits per second.
+    /// Target bit rate in kilobits per second; also the VBV maximum rate.
     pub bitrate_kbps: u32,
+    /// libx264 preset.
+    pub preset: X264Preset,
+    /// Apply libx264's `zerolatency` tune.
+    pub zerolatency: bool,
+    /// VBV buffer in milliseconds of `bitrate_kbps`; 0 disables the cap.
+    pub vbv_buffer_ms: u32,
 }
 
 impl EncoderSettings {
@@ -115,6 +121,9 @@ impl EncoderSettings {
             },
             keyframe_interval: config.encode.keyframe_interval.max(1),
             bitrate_kbps: config.encode.bitrate_kbps.max(1),
+            preset: config.encode.preset,
+            zerolatency: config.encode.tune_zerolatency,
+            vbv_buffer_ms: config.encode.vbv_buffer_ms,
         }
     }
 }

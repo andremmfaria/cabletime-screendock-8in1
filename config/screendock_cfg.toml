@@ -31,10 +31,19 @@ backend = "auto"
 fps = 25
 
 [encode]
-# Target H.264 bit rate in kilobits per second.
+# libx264 preset: "ultrafast", "superfast", "veryfast", "faster", "fast" or "medium". Slower
+# presets give better quality at one bit rate and cost more CPU.
+preset = "ultrafast"
+# Apply libx264's zerolatency tune (no lookahead, no frame delay).
+tune_zerolatency = true
+# Target H.264 bit rate in kilobits per second. It is also the VBV maximum rate. Fast moving
+# content looks blocky or glitchy when this is too low for the picture.
 bitrate_kbps = 4000
 # Frames between keyframes (about two seconds at 25 fps).
 keyframe_interval = 50
+# VBV buffer in milliseconds of bitrate_kbps. It bounds the size of any one frame, keyframes
+# included (100 ms at 4000 kbit/s is 400 kbit). 0 turns the cap off.
+vbv_buffer_ms = 100
 
 [daemon]
 # Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via

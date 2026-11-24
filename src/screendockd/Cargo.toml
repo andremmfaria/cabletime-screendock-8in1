@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
