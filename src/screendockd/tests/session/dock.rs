@@ -65,6 +65,7 @@ fn params(max_frames: Option<u64>) -> DaemonParams {
                 bitrate_kbps: 1000,
                 vbv_buffer_ms: 200,
                 keyframe_interval: 2,
+                ..PipelineKnobs::for_geometry(geometry())
             },
             true,
         ),

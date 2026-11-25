@@ -64,9 +64,9 @@ screendockd [--config PATH] ctl [--socket PATH] reload
 
 The settings of the running daemon are not written to the config file; they last until the daemon exits. Requests are handled one at a time in arrival order.
 
-The running pipeline executes these changes: `bitrate`, `vbv-buffer-ms` and `keyframe-interval` on the running encoder, the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`, which are recorded for the next switch to extend. Changes to `resolution`, `orientation`, `fps`, `preset`, `tune` and `mode` need steps the pipeline cannot do and are rejected.
+The running pipeline executes these changes: `bitrate`, `vbv-buffer-ms` and `keyframe-interval` on the running encoder, the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`, which are recorded for the next switch to extend. Changes to `resolution`, `orientation`, `fps`, `preset` and `tune` rebuild the encoder in the video loop, retarget capture when the frame rate changes, and for a new picture size run the dock cycle (see [daemon.md](daemon.md#loops)). They are rejected when the daemon runs with `--no-handshake`, because there is no session to cycle. A change to `mode` needs steps the pipeline cannot do and is rejected.
 
-The video loop applies a bit rate or keyframe interval change at a frame boundary and the supervisor waits up to 3 seconds for it. If the encoder refuses the change, the answer is `rejected` with the encoder's reason and the previous values are restored. No dock handshake runs, no `app-launched` is sent and the heartbeat is not interrupted.
+The video loop applies a bit rate or keyframe interval change at a frame boundary and the supervisor waits up to 3 seconds for it; a change that rebuilds the encoder or runs the dock cycle gets up to 15 seconds. If the encoder refuses the change, the answer is `rejected` with the encoder's reason and the previous values are restored. No dock handshake runs, no `app-launched` is sent and the heartbeat is not interrupted.
 
 ### Class of every key
 

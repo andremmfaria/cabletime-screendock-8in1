@@ -1,15 +1,19 @@
 //! Types of the application layer: daemon parameters, report and errors.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use thiserror::Error;
 
 use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
-use crate::core::session::{SessionError, SessionSettings};
+use crate::core::session::{SessionError, SessionHandle, SessionSettings};
+use crate::ports::capture::{CaptureArea, CaptureBackend};
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings};
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::ReportId;
+use crate::utils::config::X264Preset;
 
 /// Consecutive failed frames after which the daemon gives up.
 pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
@@ -110,7 +114,46 @@ pub struct PipelineKnobs {
     pub bitrate_kbps: u32,
     pub vbv_buffer_ms: u32,
     pub keyframe_interval: u32,
+    /// Encoded picture size and orientation; also the size in every video header.
+    pub geometry: DisplayGeometry,
+    pub fps: u32,
+    pub preset: X264Preset,
+    pub tune_zerolatency: bool,
+    /// The part of the source that is captured.
+    pub area: CaptureArea,
 }
+
+/// Builds an encoder for a set of settings. The video loop calls it when a change needs a new
+/// encoder.
+#[derive(Clone)]
+pub struct EncoderBuilder(pub(super) Arc<BuildFn>);
+
+pub(super) type BuildFn =
+    dyn Fn(EncoderSettings) -> Result<Box<dyn Encoder>, EncodeError> + Send + Sync;
+
+impl fmt::Debug for EncoderBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("EncoderBuilder")
+    }
+}
+
+/// The encoder the video loop runs: the one it was started with until a rebuild replaces it.
+pub(super) struct EncoderSlot<'a> {
+    pub(super) base: &'a mut dyn Encoder,
+    pub(super) replacement: Option<Box<dyn Encoder>>,
+}
+
+/// What a change to the running pipeline works on.
+pub(super) struct LoopParts<'a, 's> {
+    pub(super) slot: &'a mut EncoderSlot<'s>,
+    pub(super) capture: &'a mut dyn CaptureBackend,
+    pub(super) session: &'a SessionHandle,
+    pub(super) pipeline: &'a PipelineState,
+    pub(super) cycle_timeout: Duration,
+}
+
+/// Longest the supervisor waits for a change that rebuilds the encoder or runs the dock cycle.
+pub(super) const CYCLE_APPLY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub(super) struct PipelineShared {
@@ -128,6 +171,7 @@ pub struct PipelineState {
     pub(super) shared: Mutex<PipelineShared>,
     pub(super) done: Condvar,
     pub(super) live_rate: bool,
+    pub(super) builder: Option<EncoderBuilder>,
 }
 
 /// The pipeline handle of a running daemon: bit rate and keyframe interval changes go through

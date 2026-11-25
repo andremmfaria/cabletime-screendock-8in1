@@ -5,7 +5,9 @@
 use std::fmt;
 use std::path::Path;
 
-pub use super::types::{CaptureBackend, CaptureError, Frame, PixelFormat};
+pub use super::types::{
+    CaptureArea, CaptureBackend, CaptureError, CaptureTarget, Frame, PixelFormat,
+};
 
 impl PixelFormat {
     /// Bytes occupied by one pixel.
@@ -159,6 +161,27 @@ mod tests {
         let info = reader.next_frame(&mut buf).unwrap();
         assert_eq!((info.width, info.height), (2, 1));
         assert_eq!(&buf[..6], &[255, 0, 0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn retargeting_is_refused_unless_a_backend_implements_it() {
+        struct Fixed;
+        impl CaptureBackend for Fixed {
+            fn name(&self) -> &'static str {
+                "fixed"
+            }
+            fn next_frame(&mut self) -> Result<Frame, CaptureError> {
+                Frame::new(1, 1, PixelFormat::Rgba8888, 4, vec![1, 2, 3, 4])
+            }
+        }
+        let target = CaptureTarget {
+            area: CaptureArea::Whole,
+            fps: 25,
+        };
+        assert!(matches!(
+            Fixed.retarget(target),
+            Err(CaptureError::Unsupported(_))
+        ));
     }
 
     /// The trait must stay usable as a boxed trait object.

@@ -70,6 +70,12 @@ pub enum CaptureError {
     /// PNG encoding failed.
     #[error("png encoding failed: {0}")]
     Png(String),
+    /// The backend cannot do what was asked while it runs.
+    #[error("{0} is not supported by this capture backend")]
+    Unsupported(&'static str),
+    /// The requested capture area does not fit the source.
+    #[error("invalid capture target: {0}")]
+    InvalidTarget(String),
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -82,6 +88,30 @@ pub trait CaptureBackend: Send {
 
     /// Blocks until the next frame is due and returns it.
     fn next_frame(&mut self) -> Result<Frame, CaptureError>;
+
+    /// Points the running backend at another area and frame rate. Frames after the call
+    /// carry the new area's size. Backends that cannot do this keep the default, which
+    /// refuses.
+    fn retarget(&mut self, _target: CaptureTarget) -> Result<(), CaptureError> {
+        Err(CaptureError::Unsupported("retargeting while running"))
+    }
+}
+
+/// The part of the source a backend captures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureArea {
+    /// The whole source (the root window on X11).
+    Whole,
+    /// A rectangle of the source in its own coordinates.
+    Region(Rect),
+}
+
+/// Where a capture backend looks and how fast it produces frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptureTarget {
+    pub area: CaptureArea,
+    /// Frames per second; zero disables pacing.
+    pub fps: u32,
 }
 
 /// Frame rate used when the config leaves pacing disabled (`capture.fps = 0`).

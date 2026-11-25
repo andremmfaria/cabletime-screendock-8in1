@@ -41,8 +41,11 @@ pub struct X11ShmCapture {
     pub(super) root: Window,
     pub(super) seg: shm::Seg,
     pub(super) map: MmapMut,
+    /// Size of the captured rectangle.
     pub(super) width: u16,
     pub(super) height: u16,
+    /// Top left corner of the captured rectangle in the root window.
+    pub(super) origin: (i16, i16),
     pub(super) interval: Duration,
     pub(super) next_due: Option<Instant>,
 }

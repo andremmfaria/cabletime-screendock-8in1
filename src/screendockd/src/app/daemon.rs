@@ -20,17 +20,19 @@ use std::time::Instant;
 use tracing::{debug, info, info_span, warn};
 
 pub use super::types::{
-    DaemonError, DaemonParams, DaemonReport, PipelineKnobs, DEFAULT_MAX_CONSECUTIVE_ERRORS,
+    DaemonError, DaemonParams, DaemonReport, EncoderBuilder, PipelineKnobs,
+    DEFAULT_MAX_CONSECUTIVE_ERRORS,
 };
 use super::types::{
-    CAPTURE_RETRY_DELAY, STATS_INTERVAL, UNARMED_POLL, WRITE_FAILURES_BEFORE_REHANDSHAKE,
+    EncoderSlot, LoopParts, CAPTURE_RETRY_DELAY, STATS_INTERVAL, UNARMED_POLL,
+    WRITE_FAILURES_BEFORE_REHANDSHAKE,
 };
 use crate::core::keyframe::KeyframeClock;
 use crate::core::session::{Session, SessionHandle};
-use crate::ports::capture::CaptureBackend;
+use crate::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use crate::ports::encode::{Encoder, RateSettings};
 use crate::ports::transport::DockTransport;
-use crate::protocol::framing::{MessageBuilder, ReportId};
+use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
 
 /// Runs the daemon until `stop` is set, `params.max_frames` frames were sent, or too many frames
 /// in a row failed.
@@ -86,7 +88,7 @@ pub fn run(
 fn video_loop(
     mi01: &mut impl DockTransport,
     capture: &mut dyn CaptureBackend,
-    encoder: &mut dyn Encoder,
+    base_encoder: &mut dyn Encoder,
     params: &DaemonParams,
     session: &SessionHandle,
     stop: &AtomicBool,
@@ -95,7 +97,7 @@ fn video_loop(
     let span = info_span!(
         "video_loop",
         capture = capture.name(),
-        encoder = encoder.name()
+        encoder = base_encoder.name()
     );
     let _guard = span.enter();
     info!("video loop started");
@@ -107,6 +109,10 @@ fn video_loop(
     let mut clock = KeyframeClock::new(params.pipeline.knobs().keyframe_interval);
     let mut applied = params.pipeline.knobs();
     let mut seen = 0u64;
+    let mut slot = EncoderSlot {
+        base: base_encoder,
+        replacement: None,
+    };
     let fail = |consecutive: &mut u32, what: String| -> Result<(), DaemonError> {
         *consecutive += 1;
         if *consecutive >= params.max_consecutive_errors {
@@ -122,7 +128,19 @@ fn video_loop(
     {
         if let Some((version, knobs)) = params.pipeline.pending(seen) {
             seen = version;
-            let result = apply_knobs(encoder, &mut clock, &mut applied, knobs);
+            // The change runs here, on the only thread that writes video, so nothing is
+            // written while the encoder is swapped or the dock cycle runs.
+            let mut parts = LoopParts {
+                slot: &mut slot,
+                capture: &mut *capture,
+                session,
+                pipeline: &params.pipeline,
+                cycle_timeout: params.session.cycle_timeout(),
+            };
+            let result = apply_knobs(&mut parts, &mut clock, &mut applied, knobs);
+            if let Err(reason) = &result {
+                warn!(%reason, "pipeline change refused");
+            }
             params.pipeline.complete(version, result);
         }
         if !session.is_armed() {
@@ -134,6 +152,7 @@ fn video_loop(
             std::thread::sleep(UNARMED_POLL);
             continue;
         }
+        let encoder = slot.active();
         if session.generation() != generation {
             generation = session.generation();
             force_keyframe(encoder, &mut clock);
@@ -170,7 +189,7 @@ fn video_loop(
                 frame_ok = false;
                 break;
             }
-            let chunks = MessageBuilder::video(params.geometry.size())
+            let chunks = MessageBuilder::video(applied.geometry.size())
                 .payload(message.as_bytes())
                 .build();
             match mi01.write_chunks(&chunks) {
@@ -219,31 +238,117 @@ fn video_loop(
     Ok(())
 }
 
+impl EncoderSlot<'_> {
+    /// The encoder that produces the next frame.
+    fn active(&mut self) -> &mut dyn Encoder {
+        match self.replacement.as_mut() {
+            Some(encoder) => encoder.as_mut(),
+            None => &mut *self.base,
+        }
+    }
+}
+
 /// Asks for a keyframe on the next frame and restarts the keyframe count.
 fn force_keyframe(encoder: &mut dyn Encoder, clock: &mut KeyframeClock) {
     encoder.request_keyframe();
     clock.keyframe_forced();
 }
 
-/// Applies the published knobs to the encoder and the keyframe clock. On an encoder error
-/// nothing changes.
+/// Applies the published knobs. A change that needs a new encoder, another capture area or
+/// the dock cycle is done in one piece: the new encoder is built and probed first, then
+/// capture is retargeted, then the dock cycle runs, and only when all of that worked the new
+/// encoder replaces the old one. On an error nothing has changed.
 fn apply_knobs(
-    encoder: &mut dyn Encoder,
+    parts: &mut LoopParts<'_, '_>,
     clock: &mut KeyframeClock,
     current: &mut PipelineKnobs,
     new: PipelineKnobs,
 ) -> Result<(), String> {
-    if new.bitrate_kbps != current.bitrate_kbps || new.vbv_buffer_ms != current.vbv_buffer_ms {
-        encoder
-            .set_rate(RateSettings {
-                bitrate_kbps: new.bitrate_kbps,
-                vbv_buffer_ms: new.vbv_buffer_ms,
-            })
-            .map_err(|e| e.to_string())?;
+    let rate_changed =
+        new.bitrate_kbps != current.bitrate_kbps || new.vbv_buffer_ms != current.vbv_buffer_ms;
+    let rebuild = new.geometry != current.geometry
+        || new.fps != current.fps
+        || new.preset != current.preset
+        || new.tune_zerolatency != current.tune_zerolatency
+        || (rate_changed && !parts.pipeline.live_rate());
+    if rebuild {
+        rebuild_pipeline(parts, current, &new)?;
+        clock.set_interval(new.keyframe_interval);
+        clock.keyframe_forced();
+    } else {
+        if rate_changed {
+            parts
+                .slot
+                .active()
+                .set_rate(RateSettings {
+                    bitrate_kbps: new.bitrate_kbps,
+                    vbv_buffer_ms: new.vbv_buffer_ms,
+                })
+                .map_err(|e| e.to_string())?;
+        }
+        if new.area != current.area {
+            parts
+                .capture
+                .retarget(new.capture_target())
+                .map_err(|e| e.to_string())?;
+        }
+        clock.set_interval(new.keyframe_interval);
     }
-    clock.set_interval(new.keyframe_interval);
     *current = new;
     Ok(())
+}
+
+fn rebuild_pipeline(
+    parts: &mut LoopParts<'_, '_>,
+    current: &PipelineKnobs,
+    new: &PipelineKnobs,
+) -> Result<(), String> {
+    let builder = parts
+        .pipeline
+        .builder()
+        .ok_or("this pipeline cannot rebuild the encoder")?;
+    let mut next = builder
+        .build(new.encoder_settings())
+        .map_err(|e| e.to_string())?;
+    probe_encoder(next.as_mut(), new.geometry.size())?;
+
+    let retargeted = new.area != current.area || new.fps != current.fps;
+    if retargeted {
+        match parts.capture.retarget(new.capture_target()) {
+            Ok(()) => {}
+            // A backend that cannot change its rate still serves a new encoder rate.
+            Err(CaptureError::Unsupported(_)) if new.area == current.area => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    let size = new.geometry.size();
+    if size != current.geometry.size() {
+        if let Err(e) = parts.session.renegotiate(size, parts.cycle_timeout) {
+            if retargeted {
+                let _ = parts.capture.retarget(current.capture_target());
+            }
+            return Err(e.to_string());
+        }
+    }
+    next.request_keyframe();
+    parts.slot.replacement = Some(next);
+    Ok(())
+}
+
+/// Encodes one black frame of the output size so an encoder that cannot work at it is found
+/// before anything else changes. The output is discarded.
+fn probe_encoder(encoder: &mut dyn Encoder, size: PictureSize) -> Result<(), String> {
+    let (width, height) = (size.width.0, size.height.0);
+    let stride = width as usize * 4;
+    let frame = Frame::new(
+        width,
+        height,
+        PixelFormat::Bgrx8888,
+        stride,
+        vec![0; stride * height as usize],
+    )
+    .map_err(|e| e.to_string())?;
+    encoder.encode(&frame).map(drop).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -325,6 +430,7 @@ mod tests {
                     bitrate_kbps: 1000,
                     vbv_buffer_ms: 200,
                     keyframe_interval: 2,
+                    ..PipelineKnobs::for_geometry(geometry())
                 },
                 true,
             ),

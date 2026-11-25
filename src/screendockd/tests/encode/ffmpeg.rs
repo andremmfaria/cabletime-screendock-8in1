@@ -264,3 +264,22 @@ fn keyframe_clock_changes_the_idr_spacing_while_the_encoder_runs() {
         assert_eq!(decode_with_cli(&all, 320, 240), 60);
     }
 }
+
+#[test]
+fn an_encoder_built_at_a_new_size_starts_with_parameter_sets_and_decodes() {
+    let mut old = FfmpegEncoder::new(settings(320, 240, Orientation::Landscape)).unwrap();
+    for n in 0..3 {
+        old.encode(&synthetic_frame(n)).unwrap();
+    }
+    drop(old);
+
+    let mut rebuilt = FfmpegEncoder::new(settings(480, 360, Orientation::Landscape)).unwrap();
+    let messages = encode_sequence(&mut rebuilt);
+    assert_eq!(messages.len(), FRAMES);
+    assert!(messages[0].is_keyframe());
+    let types = nal_types(&messages[0]);
+    assert_eq!((types[0], types[1], *types.last().unwrap()), (7, 8, 5));
+    if ffmpeg_available() {
+        assert_eq!(decode_with_cli(&messages, 480, 360), FRAMES);
+    }
+}

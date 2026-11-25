@@ -7,12 +7,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
-use screendockd::app::daemon::{run, DaemonParams, PipelineKnobs};
-use screendockd::app::pipeline::{EncoderPipeline, PipelineState};
+use screendockd::app::daemon::{run, DaemonError, DaemonParams, DaemonReport, PipelineKnobs};
+use screendockd::app::pipeline::{EncoderBuilder, EncoderPipeline, PipelineState};
 use screendockd::app::supervisor::Supervisor;
 use screendockd::core::reconfig::LiveSettings;
 use screendockd::core::session::{Session, SessionError, SessionSettings, SessionState};
-use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use screendockd::ports::capture::{
+    CaptureArea, CaptureBackend, CaptureError, CaptureTarget, Frame, PixelFormat,
+};
 use screendockd::ports::control::Command;
 use screendockd::ports::encode::{
     EncodeError, Encoder, EncoderSettings, RateSettings, VideoMessage,
@@ -123,6 +125,7 @@ fn live_bitrate_and_keyframe_interval_changes_need_no_new_handshake() {
             bitrate_kbps: 4000,
             vbv_buffer_ms: 100,
             keyframe_interval: 50,
+            ..PipelineKnobs::for_geometry(geometry())
         },
         true,
     );
@@ -396,4 +399,287 @@ fn the_dock_dropping_the_session_after_some_video_is_noticed() {
     wait_for("the handshake again", || {
         handle.is_armed() && handle.handshakes() >= 2
     });
+}
+
+/// A capture double that records every retarget.
+struct Tracking {
+    targets: Arc<Mutex<Vec<CaptureTarget>>>,
+}
+
+impl CaptureBackend for Tracking {
+    fn name(&self) -> &'static str {
+        "tracking"
+    }
+    fn next_frame(&mut self) -> Result<Frame, CaptureError> {
+        std::thread::sleep(Duration::from_millis(5));
+        Frame::new(2, 2, PixelFormat::Bgrx8888, 8, vec![0; 16])
+    }
+    fn retarget(&mut self, target: CaptureTarget) -> Result<(), CaptureError> {
+        self.targets.lock().unwrap().push(target);
+        Ok(())
+    }
+}
+
+/// What an encoder produced: its build number, whether the message is a keyframe and the type
+/// of the first NAL.
+type Emitted = Arc<Mutex<Vec<(usize, bool, u8)>>>;
+
+struct Logged {
+    inner: PrerecordedEncoder,
+    number: usize,
+    emitted: Emitted,
+}
+
+impl Encoder for Logged {
+    fn name(&self) -> &'static str {
+        "logged"
+    }
+    fn encode(&mut self, frame: &Frame) -> Result<Vec<VideoMessage>, EncodeError> {
+        let messages = self.inner.encode(frame)?;
+        let mut emitted = self.emitted.lock().unwrap();
+        emitted.extend(
+            messages
+                .iter()
+                .map(|m| (self.number, m.is_keyframe(), m.as_bytes()[4] & 0x1F)),
+        );
+        Ok(messages)
+    }
+    fn request_keyframe(&mut self) {
+        self.inner.request_keyframe();
+    }
+    fn set_rate(&mut self, _rate: RateSettings) -> Result<(), EncodeError> {
+        Ok(())
+    }
+    fn supports_live_rate(&self) -> bool {
+        true
+    }
+}
+
+fn stream_with(settings: EncoderSettings) -> PrerecordedEncoder {
+    let mut messages = vec![vec![
+        0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68, 2, 0, 0, 0, 1, 0x65, 9,
+    ]];
+    for _ in 0..199 {
+        messages.push(vec![0, 0, 0, 1, 0x41, 4]);
+    }
+    PrerecordedEncoder::new(messages, settings).unwrap()
+}
+
+/// A daemon on a simulated dock with a supervisor that can rebuild its encoder.
+struct Rig {
+    dock: FakeDock,
+    supervisor: Supervisor,
+    stop: Arc<AtomicBool>,
+    daemon: std::thread::JoinHandle<Result<DaemonReport, DaemonError>>,
+    built: Arc<Mutex<Vec<EncoderSettings>>>,
+    emitted: Emitted,
+    targets: Arc<Mutex<Vec<CaptureTarget>>>,
+}
+
+fn rig(refused_by_encoder: Option<PictureSize>) -> Rig {
+    let (dock, mi00, mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
+    let built: Arc<Mutex<Vec<EncoderSettings>>> = Arc::default();
+    let emitted: Emitted = Arc::default();
+    let targets: Arc<Mutex<Vec<CaptureTarget>>> = Arc::default();
+    let make = {
+        let built = Arc::clone(&built);
+        let emitted = Arc::clone(&emitted);
+        move |settings: EncoderSettings| -> Result<Box<dyn Encoder>, EncodeError> {
+            let number = {
+                let mut built = built.lock().unwrap();
+                built.push(settings);
+                built.len() - 1
+            };
+            if Some(settings.geometry.size()) == refused_by_encoder {
+                return Err(EncodeError::Setup("size refused".into()));
+            }
+            Ok(Box::new(Logged {
+                inner: stream_with(settings),
+                number,
+                emitted: Arc::clone(&emitted),
+            }))
+        }
+    };
+    let state = PipelineState::with_builder(
+        PipelineKnobs {
+            keyframe_interval: 50,
+            ..PipelineKnobs::for_geometry(geometry())
+        },
+        true,
+        EncoderBuilder::new(make.clone()),
+    );
+    let session = fast_settings(geometry().size());
+    let params = DaemonParams {
+        geometry: geometry(),
+        session,
+        max_frames: None,
+        max_consecutive_errors: 50,
+        pipeline: Arc::clone(&state),
+    };
+    let first_settings = state.knobs().encoder_settings();
+    let stop = Arc::new(AtomicBool::new(false));
+    let daemon = {
+        let stop = Arc::clone(&stop);
+        let targets = Arc::clone(&targets);
+        std::thread::spawn(move || {
+            let mut first = make(first_settings).unwrap();
+            run(
+                mi00,
+                mi01,
+                &mut Tracking { targets },
+                first.as_mut(),
+                &params,
+                &stop,
+            )
+        })
+    };
+    let config =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/screendock_cfg.toml");
+    let live = LiveSettings::try_from(&load_from_path(&config).unwrap()).unwrap();
+    let supervisor = Supervisor::new(
+        live,
+        Box::new(|| Err("no file".into())),
+        Box::new(EncoderPipeline::new(state)),
+    );
+    Rig {
+        dock,
+        supervisor,
+        stop,
+        daemon,
+        built,
+        emitted,
+        targets,
+    }
+}
+
+impl Rig {
+    fn finish(self) -> (DaemonReport, FakeDock) {
+        self.stop.store(true, Ordering::Relaxed);
+        (self.daemon.join().unwrap().unwrap(), self.dock)
+    }
+}
+
+fn applied_class(response: ControlResponse) -> String {
+    match response {
+        ControlResponse::Applied { class, .. } => class,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn size_change_rebuilds_the_encoder_and_runs_the_dock_cycle_with_video_at_the_new_size() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+
+    let class = applied_class(ask(&mut rig.supervisor, "resolution", "1600x900"));
+    assert_eq!(class, "dock cycle");
+    wait_for("video at the new size", || {
+        rig.dock.video_stats().sizes == [(1280, 720), (1600, 900)]
+    });
+    let after = rig.dock.video_stats().messages;
+    wait_for("more video", || rig.dock.video_stats().messages > after + 5);
+
+    let (emitted, built) = (rig.emitted.clone(), rig.built.clone());
+    let (report, dock) = rig.finish();
+    assert_eq!(report.handshakes, 2);
+    assert_eq!(dock.launch_sizes(), [(1280, 720), (1600, 900)]);
+    assert!(dock
+        .host_methods()
+        .contains(&"notify-projection-stopped".to_string()));
+    let built = built.lock().unwrap();
+    assert_eq!(built.len(), 2);
+    assert_eq!(built[1].geometry.size(), PictureSize::new(1600, 900));
+    // The rebuilt encoder starts with a keyframe that carries the parameter sets.
+    let emitted = emitted.lock().unwrap();
+    let first_new = emitted.iter().find(|(number, ..)| *number == 1).unwrap();
+    assert_eq!((first_new.1, first_new.2), (true, 7));
+    let beats = dock.heartbeat_times();
+    let widest = beats.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+    assert!(widest < Duration::from_secs(2), "heartbeat gap {widest:?}");
+    assert_eq!(dock.video_stats().layout_violations, 0);
+}
+
+#[test]
+fn fps_and_preset_changes_rebuild_the_encoder_without_a_dock_cycle() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+
+    assert_eq!(
+        applied_class(ask(&mut rig.supervisor, "fps", "10")),
+        "rebuild"
+    );
+    assert_eq!(
+        applied_class(ask(&mut rig.supervisor, "preset", "veryfast")),
+        "rebuild"
+    );
+    let after = rig.dock.video_stats().messages;
+    wait_for("video after the rebuilds", || {
+        rig.dock.video_stats().messages > after + 5
+    });
+
+    let (built, targets, emitted) = (rig.built.clone(), rig.targets.clone(), rig.emitted.clone());
+    let (report, dock) = rig.finish();
+    assert_eq!(report.handshakes, 1, "no dock cycle");
+    assert_eq!(dock.launch_sizes(), [(1280, 720)]);
+    assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
+    assert_eq!(built.lock().unwrap().len(), 3);
+    assert_eq!(
+        targets.lock().unwrap().as_slice(),
+        [CaptureTarget {
+            area: CaptureArea::Whole,
+            fps: 10
+        }]
+    );
+    let emitted = emitted.lock().unwrap();
+    for number in [1, 2] {
+        let first = emitted.iter().find(|(n, ..)| *n == number).unwrap();
+        assert_eq!((first.1, first.2), (true, 7), "encoder {number}");
+    }
+}
+
+#[test]
+fn an_encoder_that_refuses_the_new_size_changes_nothing() {
+    let mut rig = rig(Some(PictureSize::new(1600, 900)));
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+
+    match ask(&mut rig.supervisor, "resolution", "1600x900") {
+        ControlResponse::Rejected { reason, .. } => {
+            assert!(reason.contains("size refused"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(rig.supervisor.settings().geometry, geometry());
+    let after = rig.dock.video_stats().messages;
+    wait_for("video continues", || {
+        rig.dock.video_stats().messages > after + 5
+    });
+    let (report, dock) = rig.finish();
+    assert_eq!(report.handshakes, 1);
+    assert_eq!(dock.launch_sizes(), [(1280, 720)], "the dock saw no cycle");
+    assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
+}
+
+#[test]
+fn a_size_the_dock_refuses_leaves_the_old_encoder_and_size_running() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+    rig.dock.reject_size(PictureSize::new(1600, 900));
+
+    match ask(&mut rig.supervisor, "resolution", "1600x900") {
+        ControlResponse::Rejected { reason, .. } => {
+            assert!(reason.contains("app-launched"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(rig.supervisor.settings().geometry, geometry());
+    let dock_sizes = || rig.dock.launch_sizes();
+    wait_for("the old size is launched again", || {
+        dock_sizes().last() == Some(&(1280, 720)) && dock_sizes().len() >= 3
+    });
+    let after = rig.dock.video_stats().messages;
+    wait_for("video continues", || {
+        rig.dock.video_stats().messages > after + 5
+    });
+    let (_, dock) = rig.finish();
+    assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
 }

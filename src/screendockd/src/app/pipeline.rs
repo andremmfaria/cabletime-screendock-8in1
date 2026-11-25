@@ -3,14 +3,94 @@
 use std::sync::{Arc, MutexGuard};
 use std::time::{Duration, Instant};
 
-pub use super::types::{EncoderPipeline, PipelineKnobs, PipelineState};
-use super::types::{PipelineShared, APPLY_TIMEOUT};
+pub use super::types::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
+use super::types::{PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT};
 use crate::app::supervisor::PipelineHandle;
-use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
+use crate::core::reconfig::{ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
+use crate::ports::capture::{CaptureArea, CaptureTarget};
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, DEFAULT_FPS};
+use crate::protocol::display::DisplayGeometry;
+use crate::utils::config::X264Preset;
+
+impl EncoderBuilder {
+    pub fn new(
+        build: impl Fn(EncoderSettings) -> Result<Box<dyn Encoder>, EncodeError> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(build))
+    }
+
+    pub fn build(&self, settings: EncoderSettings) -> Result<Box<dyn Encoder>, EncodeError> {
+        (self.0)(settings)
+    }
+}
+
+impl PipelineKnobs {
+    /// The knobs a set of live settings asks for. The captured area is the whole source.
+    pub fn from_live(settings: &LiveSettings) -> Self {
+        Self {
+            bitrate_kbps: settings.bitrate_kbps,
+            vbv_buffer_ms: settings.vbv_buffer_ms,
+            keyframe_interval: settings.keyframe_interval,
+            geometry: settings.geometry,
+            fps: settings.fps,
+            preset: settings.preset,
+            tune_zerolatency: settings.tune_zerolatency,
+            area: CaptureArea::Whole,
+        }
+    }
+
+    /// Knobs with the daemon's usual values for `geometry`.
+    pub fn for_geometry(geometry: DisplayGeometry) -> Self {
+        Self {
+            bitrate_kbps: 4000,
+            vbv_buffer_ms: 100,
+            keyframe_interval: 50,
+            geometry,
+            fps: DEFAULT_FPS,
+            preset: X264Preset::Ultrafast,
+            tune_zerolatency: true,
+            area: CaptureArea::Whole,
+        }
+    }
+
+    /// The encoder settings these knobs describe.
+    pub fn encoder_settings(&self) -> EncoderSettings {
+        EncoderSettings {
+            geometry: self.geometry,
+            fps: if self.fps == 0 { DEFAULT_FPS } else { self.fps },
+            keyframe_interval: self.keyframe_interval.max(1),
+            bitrate_kbps: self.bitrate_kbps.max(1),
+            preset: self.preset,
+            zerolatency: self.tune_zerolatency,
+            vbv_buffer_ms: self.vbv_buffer_ms,
+        }
+    }
+
+    /// Where capture has to look for these knobs.
+    pub fn capture_target(&self) -> CaptureTarget {
+        CaptureTarget {
+            area: self.area,
+            fps: self.fps,
+        }
+    }
+}
 
 impl PipelineState {
     /// A state holding `knobs`. `live_rate` says whether the encoder changes its rate in place.
     pub fn new(knobs: PipelineKnobs, live_rate: bool) -> Arc<Self> {
+        Self::build(knobs, live_rate, None)
+    }
+
+    /// Like [`PipelineState::new`], and the video loop may replace its encoder using `builder`.
+    pub fn with_builder(
+        knobs: PipelineKnobs,
+        live_rate: bool,
+        builder: EncoderBuilder,
+    ) -> Arc<Self> {
+        Self::build(knobs, live_rate, Some(builder))
+    }
+
+    fn build(knobs: PipelineKnobs, live_rate: bool, builder: Option<EncoderBuilder>) -> Arc<Self> {
         Arc::new(Self {
             shared: std::sync::Mutex::new(PipelineShared {
                 published: knobs,
@@ -21,7 +101,13 @@ impl PipelineState {
             }),
             done: std::sync::Condvar::new(),
             live_rate,
+            builder,
         })
+    }
+
+    /// For the video loop: how to build a new encoder, when the pipeline can.
+    pub fn builder(&self) -> Option<&EncoderBuilder> {
+        self.builder.as_ref()
     }
 
     fn lock(&self) -> MutexGuard<'_, PipelineShared> {
@@ -91,11 +177,11 @@ impl EncoderPipeline {
         Self { state }
     }
 
-    fn knobs_of(settings: &LiveSettings) -> PipelineKnobs {
+    fn knobs_of(&self, settings: &LiveSettings) -> PipelineKnobs {
         PipelineKnobs {
-            bitrate_kbps: settings.bitrate_kbps,
-            vbv_buffer_ms: settings.vbv_buffer_ms,
-            keyframe_interval: settings.keyframe_interval,
+            // Placement is not part of the live settings yet; the area stays as it is.
+            area: self.state.knobs().area,
+            ..PipelineKnobs::from_live(settings)
         }
     }
 }
@@ -108,6 +194,13 @@ impl PipelineHandle for EncoderPipeline {
         ];
         if self.state.live_rate() {
             actions.push(ReconfigAction::SetRate);
+        }
+        if self.state.builder().is_some() {
+            actions.extend([
+                ReconfigAction::RebuildEncoder,
+                ReconfigAction::RetargetCapture,
+                ReconfigAction::RunDockCycle,
+            ]);
         }
         actions
     }
@@ -122,18 +215,27 @@ impl PipelineHandle for EncoderPipeline {
         let touches_encoder = plan.actions().iter().any(|a| {
             matches!(
                 a,
-                ReconfigAction::SetRate | ReconfigAction::SetKeyframeInterval
+                ReconfigAction::SetRate
+                    | ReconfigAction::SetKeyframeInterval
+                    | ReconfigAction::RebuildEncoder
+                    | ReconfigAction::RetargetCapture
+                    | ReconfigAction::RunDockCycle
             )
         });
         if !touches_encoder {
             return Ok(());
         }
         let previous = self.state.knobs();
-        let version = self.state.publish(Self::knobs_of(settings));
-        if let Err(reason) = self.state.wait_applied(version, APPLY_TIMEOUT) {
+        let version = self.state.publish(self.knobs_of(settings));
+        let timeout = if plan.class() == ChangeClass::Live {
+            APPLY_TIMEOUT
+        } else {
+            CYCLE_APPLY_TIMEOUT
+        };
+        if let Err(reason) = self.state.wait_applied(version, timeout) {
             // Put the old values back so the loop and the supervisor agree again.
             let back = self.state.publish(previous);
-            let _ = self.state.wait_applied(back, APPLY_TIMEOUT);
+            let _ = self.state.wait_applied(back, timeout);
             return Err(reason);
         }
         Ok(())
@@ -147,11 +249,12 @@ mod tests {
     use crate::core::reconfig::SettingsPatch;
     use crate::utils::config::load_from_path;
 
-    const KNOBS: PipelineKnobs = PipelineKnobs {
-        bitrate_kbps: 4000,
-        vbv_buffer_ms: 100,
-        keyframe_interval: 50,
-    };
+    fn knobs() -> PipelineKnobs {
+        PipelineKnobs::for_geometry(
+            DisplayGeometry::new(1280, 720, crate::protocol::display::Orientation::Landscape)
+                .unwrap(),
+        )
+    }
 
     fn shipped() -> LiveSettings {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -184,11 +287,11 @@ mod tests {
 
     #[test]
     fn published_knobs_reach_the_loop_and_the_waiter_sees_the_result() {
-        let state = PipelineState::new(KNOBS, true);
+        let state = PipelineState::new(knobs(), true);
         let looper = video_loop(Arc::clone(&state), 0);
         let version = state.publish(PipelineKnobs {
             bitrate_kbps: 2000,
-            ..KNOBS
+            ..knobs()
         });
         assert_eq!(state.wait_applied(version, Duration::from_secs(2)), Ok(()));
         assert_eq!(state.knobs().bitrate_kbps, 2000);
@@ -197,8 +300,8 @@ mod tests {
 
     #[test]
     fn waiting_without_a_loop_times_out() {
-        let state = PipelineState::new(KNOBS, true);
-        let version = state.publish(KNOBS);
+        let state = PipelineState::new(knobs(), true);
+        let version = state.publish(knobs());
         assert!(state
             .wait_applied(version, Duration::from_millis(50))
             .is_err());
@@ -206,17 +309,17 @@ mod tests {
 
     #[test]
     fn rate_support_decides_which_steps_the_pipeline_offers() {
-        let live = EncoderPipeline::new(PipelineState::new(KNOBS, true));
+        let live = EncoderPipeline::new(PipelineState::new(knobs(), true));
         assert!(live.supported().contains(&ReconfigAction::SetRate));
         assert!(live.options().live_rate);
-        let fixed = EncoderPipeline::new(PipelineState::new(KNOBS, false));
+        let fixed = EncoderPipeline::new(PipelineState::new(knobs(), false));
         assert!(!fixed.supported().contains(&ReconfigAction::SetRate));
         assert!(!fixed.options().live_rate);
     }
 
     #[test]
     fn encoder_refusal_is_reported_and_the_old_knobs_come_back() {
-        let state = PipelineState::new(KNOBS, true);
+        let state = PipelineState::new(knobs(), true);
         let looper = video_loop(Arc::clone(&state), 1000);
         let mut pipeline = EncoderPipeline::new(Arc::clone(&state));
         let old = shipped();
@@ -228,13 +331,13 @@ mod tests {
         .unwrap();
         let plan = plan_change(&old, &new);
         assert_eq!(pipeline.apply(&plan, &new), Err("encoder refused".into()));
-        assert_eq!(state.knobs(), KNOBS);
+        assert_eq!(state.knobs(), knobs());
         drop(looper);
     }
 
     #[test]
     fn follow_only_change_does_not_touch_the_loop() {
-        let state = PipelineState::new(KNOBS, true);
+        let state = PipelineState::new(knobs(), true);
         let mut pipeline = EncoderPipeline::new(Arc::clone(&state));
         let old = shipped();
         let new = SettingsPatch {

@@ -8,7 +8,10 @@ use std::process::Command;
 
 use crate::support::{require_xvfb, Painter, HEIGHT, WIDTH};
 use screendockd::adapters::capture::x11_shm::X11ShmCapture;
-use screendockd::ports::capture::{CaptureBackend, PixelFormat};
+use screendockd::ports::capture::{
+    CaptureArea, CaptureBackend, CaptureError, CaptureTarget, PixelFormat,
+};
+use screendockd::ports::display::Rect;
 
 #[test]
 fn captures_painted_regions_with_exact_pixels() {
@@ -111,4 +114,92 @@ fn capture_subcommand_writes_png_files() {
         );
         assert_eq!(&buf[..3], &[0, 0, 255], "{name} first pixel should be blue");
     }
+}
+
+#[test]
+fn retargeting_captures_exactly_the_rectangle_and_the_whole_screen_again() {
+    let Some(xvfb) = require_xvfb() else { return };
+    let painter = Painter::connect(&xvfb.display);
+    painter.fill(0x00ff_0000, 0, 0, WIDTH, HEIGHT); // red background
+    painter.fill(0x0000_00ff, 10, 20, 50, 30); // blue
+    painter.sync();
+    let mut capture = X11ShmCapture::connect(Some(&xvfb.display), 0).expect("connect capture");
+
+    capture
+        .retarget(CaptureTarget {
+            area: CaptureArea::Region(Rect::new(10, 20, 50, 30)),
+            fps: 0,
+        })
+        .expect("retarget to the rectangle");
+    let frame = capture.next_frame().expect("frame");
+    assert_eq!((frame.width, frame.height), (50, 30));
+    assert_eq!(frame.stride, 50 * 4);
+    assert_eq!(frame.pixel_rgb(0, 0), Some((0, 0, 255)));
+    assert_eq!(frame.pixel_rgb(49, 29), Some((0, 0, 255)));
+
+    // Content around the rectangle stays out of the frame.
+    capture
+        .retarget(CaptureTarget {
+            area: CaptureArea::Region(Rect::new(9, 19, 2, 2)),
+            fps: 0,
+        })
+        .expect("retarget over the corner");
+    let corner = capture.next_frame().expect("frame");
+    assert_eq!(corner.pixel_rgb(0, 0), Some((255, 0, 0)));
+    assert_eq!(corner.pixel_rgb(1, 1), Some((0, 0, 255)));
+
+    capture
+        .retarget(CaptureTarget {
+            area: CaptureArea::Whole,
+            fps: 0,
+        })
+        .expect("retarget to the whole screen");
+    let whole = capture.next_frame().expect("frame");
+    assert_eq!(
+        (whole.width, whole.height),
+        (u32::from(WIDTH), u32::from(HEIGHT))
+    );
+}
+
+#[test]
+fn a_rectangle_outside_the_screen_is_refused_and_the_previous_target_stays() {
+    let Some(xvfb) = require_xvfb() else { return };
+    let mut capture = X11ShmCapture::connect(Some(&xvfb.display), 0).expect("connect capture");
+    for rect in [
+        Rect::new(300, 200, 50, 50),
+        Rect::new(-1, 0, 10, 10),
+        Rect::new(0, 0, 0, 10),
+        Rect::new(0, 0, 100_000, 10),
+    ] {
+        let result = capture.retarget(CaptureTarget {
+            area: CaptureArea::Region(rect),
+            fps: 0,
+        });
+        assert!(
+            matches!(result, Err(CaptureError::InvalidTarget(_))),
+            "{rect:?}: {result:?}"
+        );
+    }
+    let frame = capture.next_frame().expect("frame");
+    assert_eq!(
+        (frame.width, frame.height),
+        (u32::from(WIDTH), u32::from(HEIGHT))
+    );
+}
+
+#[test]
+fn retargeting_changes_the_frame_pacing() {
+    let Some(xvfb) = require_xvfb() else { return };
+    let mut capture = X11ShmCapture::connect(Some(&xvfb.display), 0).expect("connect capture");
+    capture
+        .retarget(CaptureTarget {
+            area: CaptureArea::Whole,
+            fps: 20,
+        })
+        .expect("retarget");
+    let start = std::time::Instant::now();
+    for _ in 0..4 {
+        capture.next_frame().expect("frame");
+    }
+    assert!(start.elapsed() >= std::time::Duration::from_millis(140));
 }

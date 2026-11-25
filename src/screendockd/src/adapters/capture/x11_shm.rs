@@ -8,15 +8,19 @@
 use std::fs::File;
 use std::time::{Duration, Instant};
 
-use memmap2::MmapOptions;
+use memmap2::{MmapMut, MmapOptions};
 use rustix::fs::{ftruncate, memfd_create, MemfdFlags};
 use x11rb::connection::Connection;
+use x11rb::protocol::shm;
 use x11rb::protocol::shm::ConnectionExt as _;
 use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, ImageOrder};
+use x11rb::rust_connection::RustConnection;
 
 pub use super::types::X11ShmCapture;
 use super::types::BYTES_PER_PIXEL;
-use crate::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use crate::ports::capture::{
+    CaptureArea, CaptureBackend, CaptureError, CaptureTarget, Frame, PixelFormat,
+};
 
 fn conn_err(e: impl std::fmt::Display) -> CaptureError {
     CaptureError::Connection(e.to_string())
@@ -24,6 +28,32 @@ fn conn_err(e: impl std::fmt::Display) -> CaptureError {
 
 fn shm_err(e: impl std::fmt::Display) -> CaptureError {
     CaptureError::Shm(e.to_string())
+}
+
+/// Creates a memfd backed segment of `size` bytes and attaches it to the server.
+fn alloc_segment(conn: &RustConnection, size: usize) -> Result<(shm::Seg, MmapMut), CaptureError> {
+    let fd = memfd_create("screendockd-shm", MemfdFlags::CLOEXEC).map_err(shm_err)?;
+    ftruncate(&fd, size as u64).map_err(shm_err)?;
+    let server_fd = fd.try_clone()?;
+    let file = File::from(fd);
+    // SAFETY: the mapping is of a private memfd created above. Only the X server shares it,
+    // and every read happens after the reply to the request that filled it.
+    let map = unsafe { MmapOptions::new().len(size).map_mut(&file)? };
+
+    let seg = conn.generate_id().map_err(conn_err)?;
+    conn.shm_attach_fd(seg, server_fd, false)
+        .map_err(shm_err)?
+        .check()
+        .map_err(shm_err)?;
+    Ok((seg, map))
+}
+
+fn interval_for(fps: u32) -> Duration {
+    if fps == 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_secs_f64(1.0 / f64::from(fps))
+    }
 }
 
 impl X11ShmCapture {
@@ -91,19 +121,7 @@ impl X11ShmCapture {
         let (width, height) = (geometry.width, geometry.height);
         let size = width as usize * height as usize * BYTES_PER_PIXEL;
 
-        let fd = memfd_create("screendockd-shm", MemfdFlags::CLOEXEC).map_err(shm_err)?;
-        ftruncate(&fd, size as u64).map_err(shm_err)?;
-        let server_fd = fd.try_clone()?;
-        let file = File::from(fd);
-        // SAFETY: the mapping is of a private memfd created above. Only the X server shares it,
-        // and every read happens after the reply to the request that filled it.
-        let map = unsafe { MmapOptions::new().len(size).map_mut(&file)? };
-
-        let seg = conn.generate_id().map_err(conn_err)?;
-        conn.shm_attach_fd(seg, server_fd, false)
-            .map_err(shm_err)?
-            .check()
-            .map_err(shm_err)?;
+        let (seg, map) = alloc_segment(&conn, size)?;
 
         Ok(Self {
             conn,
@@ -112,11 +130,8 @@ impl X11ShmCapture {
             map,
             width,
             height,
-            interval: if fps == 0 {
-                Duration::ZERO
-            } else {
-                Duration::from_secs_f64(1.0 / f64::from(fps))
-            },
+            origin: (0, 0),
+            interval: interval_for(fps),
             next_due: None,
         })
     }
@@ -148,8 +163,8 @@ impl CaptureBackend for X11ShmCapture {
             .conn
             .shm_get_image(
                 self.root,
-                0,
-                0,
+                self.origin.0,
+                self.origin.1,
                 self.width,
                 self.height,
                 u32::MAX,
@@ -175,6 +190,60 @@ impl CaptureBackend for X11ShmCapture {
             stride,
             self.map[..needed].to_vec(),
         )
+    }
+
+    fn retarget(&mut self, target: CaptureTarget) -> Result<(), CaptureError> {
+        let (x, y, width, height) = self.resolve(target)?;
+        let needed = width as usize * height as usize * BYTES_PER_PIXEL;
+        if needed > self.map.len() {
+            let (seg, map) = alloc_segment(&self.conn, needed)?;
+            let old = std::mem::replace(&mut self.seg, seg);
+            self.map = map;
+            let _ = self.conn.shm_detach(old);
+        }
+        self.origin = (x, y);
+        self.width = width;
+        self.height = height;
+        self.interval = interval_for(target.fps);
+        self.next_due = None;
+        Ok(())
+    }
+}
+
+impl X11ShmCapture {
+    /// The rectangle of the root window `target` selects, checked against the root's current
+    /// size.
+    fn resolve(&self, target: CaptureTarget) -> Result<(i16, i16, u16, u16), CaptureError> {
+        let root = self
+            .conn
+            .get_geometry(self.root)
+            .map_err(conn_err)?
+            .reply()
+            .map_err(conn_err)?;
+        let CaptureArea::Region(rect) = target.area else {
+            return Ok((0, 0, root.width, root.height));
+        };
+        let invalid = || {
+            CaptureError::InvalidTarget(format!(
+                "{}x{} at {},{} does not fit the {}x{} root window",
+                rect.width, rect.height, rect.x, rect.y, root.width, root.height
+            ))
+        };
+        let x = i16::try_from(rect.x).map_err(|_| invalid())?;
+        let y = i16::try_from(rect.y).map_err(|_| invalid())?;
+        let width = u16::try_from(rect.width).map_err(|_| invalid())?;
+        let height = u16::try_from(rect.height).map_err(|_| invalid())?;
+        let fits = x >= 0
+            && y >= 0
+            && width > 0
+            && height > 0
+            && i32::from(x) + i32::from(width) <= i32::from(root.width)
+            && i32::from(y) + i32::from(height) <= i32::from(root.height);
+        if fits {
+            Ok((x, y, width, height))
+        } else {
+            Err(invalid())
+        }
     }
 }
 

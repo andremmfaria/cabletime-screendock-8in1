@@ -8,8 +8,9 @@ The capture layer turns the desktop into a stream of `Frame` values for the enco
 |---|---|
 | `Frame` | `width`, `height`, `format` (`PixelFormat`), `stride` (bytes per row) and `data`. `Frame::new` rejects empty frames, strides shorter than a row and buffers shorter than the rows need. Helpers: `pixel_rgb(x, y)`, `to_rgb8()`, `write_png(path)` |
 | `PixelFormat` | Four-byte layouts named by memory byte order: `Bgrx8888`, `Bgra8888`, `Rgbx8888`, `Rgba8888` |
-| `CaptureError` | `thiserror` enum: `NoSession`, `BackendUnavailable`, `Connection`, `Shm`, `Portal`, `Stream`, `InvalidFrame`, `Png`, `Io` |
-| `CaptureBackend` | Object-safe, `Send` trait with `name()` and `next_frame() -> Result<Frame, CaptureError>`. `next_frame` blocks until a frame is due |
+| `CaptureError` | `thiserror` enum: `NoSession`, `BackendUnavailable`, `Connection`, `Shm`, `Portal`, `Stream`, `InvalidFrame`, `Png`, `Unsupported`, `InvalidTarget`, `Io` |
+| `CaptureBackend` | Object-safe, `Send` trait with `name()` and `next_frame() -> Result<Frame, CaptureError>`. `next_frame` blocks until a frame is due. `retarget(CaptureTarget)` points a running backend at another area and frame rate; the default refuses with `Unsupported` |
+| `CaptureTarget` | A `CaptureArea` (`Whole` or `Region(Rect)` in source coordinates) and a frame rate, where zero disables pacing |
 
 ## Backend selection
 
@@ -27,7 +28,7 @@ The backend is chosen once at startup by `create_backend(&config, choice)`, whic
 - A memfd is created at the root window size, mapped, and handed to the server with `ShmAttachFd`.
 - Each `next_frame` issues one `ShmGetImage` into that segment and copies the pixels into a `Frame` with format `Bgrx8888` and stride `width * 4`.
 - Frames are paced to `capture.fps`; zero disables pacing.
-- The geometry is read once at connect time. A display that changes size needs a new backend instance.
+- The root geometry is read at connect time and again on every `retarget`. `retarget` with `CaptureArea::Region` captures exactly that rectangle of the root window: frames from then on have the rectangle's size, and the shared segment is replaced by a larger one when the rectangle needs more bytes than it holds. A rectangle that is empty, starts at a negative coordinate or reaches outside the root window fails with `InvalidTarget` and the previous target stays. `CaptureArea::Whole` returns to the full root window, and the frame rate of the target sets the pacing.
 - Because the segment is passed as a file descriptor, the server must be reachable through a unix socket. A TCP connection cannot use this backend.
 
 Status: verified against Xvfb with painted content (see [testing.md](testing.md)). Not yet run against a real interactive X11 session.

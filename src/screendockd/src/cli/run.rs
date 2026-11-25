@@ -15,8 +15,8 @@ use crate::adapters::capture::create_backend;
 use crate::adapters::control::{socket_path, ControlServer};
 use crate::adapters::encode::create_encoder;
 use crate::adapters::transport::hidraw::HidrawHandle;
-use crate::app::daemon::{self, DaemonParams, PipelineKnobs, DEFAULT_MAX_CONSECUTIVE_ERRORS};
-use crate::app::pipeline::{EncoderPipeline, PipelineState};
+use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
+use crate::app::pipeline::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use crate::app::supervisor::{PipelineHandle, ReloadFn, Supervisor};
 use crate::core::reconfig::LiveSettings;
 use crate::ports::control::Command;
@@ -48,13 +48,11 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
     let mut encoder =
         create_encoder(&args.encoder.kind(), settings).context("failed to start encoder")?;
     let stop = shutdown_flag()?;
-    let pipeline = PipelineState::new(
-        PipelineKnobs {
-            bitrate_kbps: live.bitrate_kbps,
-            vbv_buffer_ms: live.vbv_buffer_ms,
-            keyframe_interval: live.keyframe_interval,
-        },
+    let kind = args.encoder.kind();
+    let pipeline = PipelineState::with_builder(
+        PipelineKnobs::from_live(&live),
         encoder.supports_live_rate(),
+        EncoderBuilder::new(move |settings| create_encoder(&kind, settings)),
     );
     let services = Services::start(
         config,
