@@ -9,9 +9,6 @@ use thiserror::Error;
 
 use super::framing::MessageBuilder;
 
-/// The JSON-RPC protocol version string carried in every message.
-pub const JSONRPC_VERSION: &str = "2.0";
-
 /// The JSON-RPC method name of the heartbeat.
 pub const HEARTBEAT_METHOD: &str = "heartbeat";
 

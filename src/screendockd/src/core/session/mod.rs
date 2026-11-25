@@ -42,12 +42,8 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-pub use crate::core::policy::{
-    DEFAULT_MAX_HEARTBEAT_FAILURES, DEFAULT_READY_TIMEOUT, DEFAULT_REPLY_TIMEOUT,
-    DEFAULT_RETRY_DELAY, DEFAULT_SETTLE_DELAY,
-};
 pub use error::SessionError;
-pub use settings::{hostname, SessionSettings};
+pub use settings::SessionSettings;
 pub use state::{SessionHandle, SessionState, SessionStats};
 
 use controller::Controller;

@@ -115,10 +115,6 @@ impl DisplayGeometry {
         self.height
     }
 
-    pub fn orientation(&self) -> Orientation {
-        self.orientation
-    }
-
     /// The width and height carried in the header of every video message.
     pub fn size(&self) -> PictureSize {
         PictureSize {

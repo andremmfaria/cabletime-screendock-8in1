@@ -1,4 +1,4 @@
-//! CPU cost measurement for the capture plus encode path (Milestone 5 CPU criterion).
+//! CPU cost measurement for the capture plus encode path (the CPU criterion).
 //!
 //! [`run_bench`] drives a capture backend and an encoder back to back for a fixed time and
 //! reports the process CPU time (user plus system, from `getrusage`) consumed by the loop

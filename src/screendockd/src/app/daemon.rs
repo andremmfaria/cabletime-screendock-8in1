@@ -1,4 +1,4 @@
-//! The capture, encode, frame and write loop plus the MI_00 session (Milestones 6 and 7).
+//! The capture, encode, frame and write loop plus the MI_00 session.
 //!
 //! [`run`] takes already opened handles and already constructed backends, so everything that can
 //! fail at startup (discovery, opening the nodes, creating the capture backend and encoder, the

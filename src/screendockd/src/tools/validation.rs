@@ -1,9 +1,9 @@
-//! Hardware validation routines for Milestones 2 and 3 (`docs/hardware-validation.md`).
+//! Hardware validation routines (`docs/hardware-validation.md`).
 //!
 //! - `run_replay`: replays video messages back-to-back and reports per-chunk write timing
-//!   (Milestone 2, native write-timing validation).
-//! - `run_isolate`: runs heartbeat-only, video-only or both for a fixed duration (Milestone 3,
-//!   heartbeat-dependency isolation).
+//!   (native write-timing validation).
+//! - `run_isolate`: runs heartbeat-only, video-only or both for a fixed duration (heartbeat-dependency
+//!   isolation).
 //!
 //! Everything takes already-open `DockTransport`s, so the same code runs against the real nodes
 //! on the dock and against a file/pipe/socket loopback in tests. Where video is sent together
@@ -24,7 +24,7 @@ use crate::protocol::heartbeat::SessionId;
 use crate::tools::heartbeat_loop::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
 
 /// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
-/// Milestone 2 exit criterion is at or below this figure.
+/// write-timing exit criterion is at or below this figure.
 pub const REFERENCE_MS_PER_CHUNK: f64 = 0.77;
 
 /// Size of the research's keyframe bundle fixture (SPS+PPS+SEI+IDR), in bytes.
@@ -133,11 +133,6 @@ impl TimingStats {
             p95: pct(95),
             p99: pct(99),
         })
-    }
-
-    /// Mean in milliseconds.
-    pub fn mean_ms(&self) -> f64 {
-        self.mean.as_secs_f64() * 1000.0
     }
 }
 
@@ -257,7 +252,7 @@ pub fn run_replay(
     })
 }
 
-/// The three Milestone 3 conditions.
+/// The three isolation conditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsolateMode {
     /// Heartbeat on MI_00 only, no video.
@@ -420,7 +415,7 @@ fn run_video_paced(
     Ok(outcome)
 }
 
-/// Runs one Milestone 3 condition for `params.duration`. Handles for channels the mode doesn't
+/// Runs one isolation condition for `params.duration`. Handles for channels the mode doesn't
 /// use must be `None`, and handles for channels it does use must be `Some`, so a heartbeat-only
 /// run provably never opens or writes to MI_01 (and vice versa).
 pub fn run_isolate(

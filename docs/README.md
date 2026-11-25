@@ -14,7 +14,7 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [daemon.md](daemon.md) | The `run` daemon: startup, loops, error policy, shutdown, resolution picker, device section |
 | [testing.md](testing.md) | Test layers, how to run them, and what each one covers |
 | [install.md](install.md) | Installing from packages or source, permissions, the systemd user unit, running and troubleshooting |
-| [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing (M2) and heartbeat isolation (M3), the streaming daemon (M6), the resolution picker (M7), and what to record |
+| [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing, heartbeat isolation, the streaming daemon and the resolution picker, and what to record |
 
 ## Device and research pages
 
@@ -26,5 +26,5 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [security-assessment.md](security-assessment.md) | Security assessment of the vendor software |
 | [reviews-and-caveats.md](reviews-and-caveats.md) | Reviews and caveats |
 | [sources.md](sources.md) | Sources |
-| [implementation-plan.md](implementation-plan.md) | Implementation plan and milestones |
+| [implementation-plan.md](implementation-plan.md) | Implementation plan |
 | [research/](research/) | Protocol research, including the full protocol specification |

@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "0.9.9"
+version = "1.0.0"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -16,11 +16,9 @@ name = "screendockd"
 path = "src/main.rs"
 
 [dependencies]
-# Design Patterns section (pattern 7, thiserror/anyhow split): typed error enums in
-# discovery.rs/protocol/framing.rs now derive via thiserror instead of hand-written Display/Error impls.
+# Typed error enums in discovery.rs and protocol/framing.rs derive via thiserror.
 thiserror = "1"
-# utils/config.rs (personal project convention, see docs/implementation-plan.md's Design
-# Patterns section): serde + toml for simple, idiomatic TOML deserialization — chosen over the
+# utils/config.rs (personal project convention): serde + toml for simple, idiomatic TOML deserialization — chosen over the
 # `config` crate because the layered-source/env-var-override machinery `config` offers is
 # redundant here, since this project hand-implements its own explicit 4-step resolution order
 # (env var -> XDG user config -> /etc system default -> repo-root dev path) rather than
@@ -44,12 +42,6 @@ serde_json = "1"
 anyhow = "1"
 # main.rs: CLI argument parsing (daemon and hardware validation subcommands).
 clap = { version = "4", features = ["derive"] }
-# Milestone 1 (device discovery + HID wire framing) needs only the standard library beyond the
-# above. Later milestones add, per docs/implementation-plan.md's "Concrete Technology Choices":
-#   - ffmpeg-next / ffmpeg_sys_next (Milestone 5: adapters/encode/ffmpeg.rs, libx264 via libavcodec)
-#   - x11 / xcb-family crate       (Milestone 4: adapters/capture/x11_shm.rs)
-#   - ashpd, pipewire              (Milestone 4: adapters/capture/wayland_portal.rs)
-
 # adapters/capture/x11_shm.rs: pure-Rust X11 client with the MIT-SHM extension; needs no system libs.
 x11rb = { version = "0.14", features = ["shm"] }
 # Anonymous shared-memory segment (memfd) handed to the X server for XShm captures, and the
@@ -126,10 +118,9 @@ assets = [
     ["../../deploy/99-screendock.rules", "lib/udev/rules.d/99-screendock.rules", "644"],
     ["../../deploy/screendockd.service", "usr/lib/systemd/user/screendockd.service", "644"],
     # Packaged default/template config. utils/config.rs's resolution order falls back to this
-    # system-wide path (step 3 of 4) when no per-user $XDG_CONFIG_HOME/screendockd/ config
+    # system-wide path (third step) when no per-user $XDG_CONFIG_HOME/screendockd/ config
     # exists yet — a package install can't pre-populate every future user's home directory, so
-    # it ships a template here instead; see utils/config.rs and docs/implementation-plan.md's
-    # Design Patterns section for the full resolution order.
+    # it ships a template here instead; see utils/config.rs for the full resolution order.
     ["../../config/screendock_cfg.toml", "etc/screendockd/screendock_cfg.toml", "644"],
 ]
 # Runtime library dependencies are derived from the release binary (it links libavcodec and

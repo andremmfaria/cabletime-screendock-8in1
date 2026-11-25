@@ -1,6 +1,4 @@
-//! Config loading: a personal/user-specified project convention (not literature-derived like
-//! the Design Patterns in `docs/implementation-plan.md`), binding project-wide going forward.
-//! See that doc's Design Patterns section for the canonical statement of this convention.
+//! Config loading: a personal/user-specified project convention, binding project-wide.
 //!
 //! ## Library choice: `serde` + `toml`, not the `config` crate
 //!

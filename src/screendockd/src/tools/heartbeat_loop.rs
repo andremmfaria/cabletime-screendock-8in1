@@ -17,9 +17,6 @@ use crate::ports::transport::{DockTransport, TransportError};
 use crate::protocol::framing::ReportId;
 use crate::protocol::heartbeat::{heartbeat_message, SessionId};
 
-/// Default tick interval when the config doesn't override it.
-pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
-
 /// Longest single sleep inside the loop, so a stop request is noticed promptly.
 const STOP_POLL_SLICE: Duration = Duration::from_millis(50);
 

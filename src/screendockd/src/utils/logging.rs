@@ -1,6 +1,4 @@
-//! Logging setup: a personal/user-specified project convention (not literature-derived like the
-//! Design Patterns in `docs/implementation-plan.md`), binding project-wide going forward. See
-//! that doc's Design Patterns section for the canonical statement of this convention.
+//! Logging setup: a personal/user-specified project convention, binding project-wide.
 //!
 //! ## Library choice: `tracing` + `tracing-subscriber`, not `log` + `env_logger`
 //!
@@ -13,7 +11,7 @@
 //!   boundaries.
 //!
 //! **Decision: `tracing` + `tracing-subscriber`.** This daemon's Architecture (see
-//! `docs/implementation-plan.md`) is a single process running several independent
+//! `docs/architecture.md`) is a single process running several independent
 //! threads/loops concurrently — capture, encode, heartbeat, framing/hidraw I/O — and a plain
 //! `log`-style flat line (`"write failed"`) loses which loop/thread/device emitted it the
 //! moment two loops are active at once. `tracing`'s spans let each loop wrap its work in a

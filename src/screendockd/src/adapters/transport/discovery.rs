@@ -1,13 +1,11 @@
 //! Device discovery: resolving the dock's MI_00 and MI_01 `/dev/hidrawN` nodes by sysfs
 //! interface number, rather than by hidraw enumeration order (which isn't guaranteed stable
-//! across reboots or across hosts — see `docs/implementation-plan.md`'s "Device identification
-//! ambiguity" risk).
+//! across reboots or across hosts).
 //!
 //! The dock enumerates as composite USB `VID_1DE1&PID_F201`, with MI_00 (HID interface number 0,
 //! Report ID 1) and MI_01 (HID interface number 1, Report ID 2) sharing that VID/PID with MI_02
-//! (Audio) and MI_04 (Mass Storage) — both stock-class devices this driver never touches. Per
-//! `docs/implementation-plan.md`'s "Device Discovery and Permissions" section, the resolution
-//! approach is: walk `/sys/class/hidraw/hidraw*/device/` symlinks back to each hidraw node's
+//! (Audio) and MI_04 (Mass Storage) — both stock-class devices this driver never touches. The
+//! resolution approach is: walk `/sys/class/hidraw/hidraw*/device/` symlinks back to each hidraw node's
 //! parent USB interface, read that interface's `bInterfaceNumber`, and match interface number 0
 //! to MI_00 and interface number 1 to MI_01 — cross-checking `idVendor`/`idProduct` on the
 //! shared USB device ancestor so an unrelated vendor-HID device elsewhere on the host is never
@@ -20,15 +18,14 @@
 //! device (`1-2`, which exposes `idVendor`/`idProduct`).
 //!
 //! This module is a from-scratch reimplementation based solely on the above documented sysfs
-//! layout (per `docs/implementation-plan.md`'s clean-room rule) — it does not reference, and was
+//! layout (clean-room) — it does not reference, and was
 //! not derived from, any decompiled vendor code; the sysfs layout itself is standard Linux
 //! kernel/udev behavior, not anything vendor-specific.
 //!
-//! Per `docs/implementation-plan.md`'s Design Patterns section (pattern 2, newtype), `Mi00Path`
-//! and `Mi01Path` are distinct types rather than two same-typed `PathBuf` fields, so a future
+//! `Mi00Path` and `Mi01Path` are distinct types rather than two same-typed `PathBuf` fields, so a future
 //! call site that accidentally swaps the control and video paths (e.g. opening MI_00 where
-//! MI_01 was intended) is a compile error, not a runtime bug discovered on real hardware. Per
-//! pattern 7, `DiscoveryError` uses `thiserror`'s derive instead of hand-written `Display`/
+//! MI_01 was intended) is a compile error, not a runtime bug discovered on real hardware.
+//! `DiscoveryError` uses `thiserror`'s derive instead of hand-written `Display`/
 //! `Error` impls, with no change to the variant shapes or matching behavior.
 
 use std::fs;
@@ -78,10 +75,6 @@ impl Mi00Path {
     pub fn as_path(&self) -> &Path {
         &self.0
     }
-
-    pub fn into_inner(self) -> PathBuf {
-        self.0
-    }
 }
 
 impl Mi01Path {
@@ -91,10 +84,6 @@ impl Mi01Path {
 
     pub fn as_path(&self) -> &Path {
         &self.0
-    }
-
-    pub fn into_inner(self) -> PathBuf {
-        self.0
     }
 }
 
@@ -135,10 +124,8 @@ pub struct DockHidrawPaths {
 
 /// Errors from resolving the dock's hidraw nodes.
 ///
-/// Per `docs/implementation-plan.md`'s Design Patterns section (pattern 7), this uses
-/// `thiserror`'s derive rather than hand-written `Display`/`Error` impls — the de facto
-/// convention for a module exposing matchable error variants to its callers. Variant shapes are
-/// unchanged from the pre-refactor version; only the boilerplate moved.
+/// Uses `thiserror`'s derive rather than hand-written `Display`/`Error` impls, the de facto
+/// convention for a module exposing matchable error variants to its callers.
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
     /// The sysfs hidraw class directory couldn't be read at all (e.g. doesn't exist, no
@@ -215,14 +202,6 @@ fn read_trimmed(path: &Path) -> Option<String> {
 /// Both base directories are parameters (rather than hardcoded `/sys`/`/dev` literals) so the
 /// matching logic can be exercised against a synthetic sysfs tree in tests, without needing a
 /// real kernel or real hardware. See this module's `tests` for a constructed example tree.
-pub fn discover_dock_hidraw(
-    sysfs_hidraw_base: &Path,
-    dev_dir: &Path,
-) -> Result<DockHidrawPaths, DiscoveryError> {
-    discover_with_ids(sysfs_hidraw_base, dev_dir, &DeviceIds::default())
-}
-
-/// Like [`discover_dock_hidraw`], matching the given vendor/product IDs instead of the dock's.
 pub fn discover_with_ids(
     sysfs_hidraw_base: &Path,
     dev_dir: &Path,
@@ -305,18 +284,10 @@ pub fn discover_with_ids(
     }
 }
 
-/// Resolves the dock's hidraw nodes against the real system's sysfs/`/dev`. This is what
-/// `main.rs`'s future startup sequence (Milestone 2+) will call; it has no test coverage of its
-/// own beyond `discover_dock_hidraw`'s logic, since exercising this specific function needs the
-/// real kernel and the real device attached.
-pub fn discover() -> Result<DockHidrawPaths, DiscoveryError> {
-    discover_dock_hidraw(
-        Path::new(DEFAULT_SYSFS_HIDRAW_BASE),
-        Path::new(DEFAULT_DEV_DIR),
-    )
-}
-
-/// [`discover`] with the vendor/product IDs from the `[device]` config section.
+/// Resolves the dock's hidraw nodes against the real system's sysfs/`/dev`, matching the
+/// vendor/product IDs from the `[device]` config section. It has no test coverage of its own
+/// beyond `discover_with_ids`'s logic, since exercising it needs the real kernel and the real
+/// device attached.
 pub fn discover_configured(ids: &DeviceIds) -> Result<DockHidrawPaths, DiscoveryError> {
     discover_with_ids(
         Path::new(DEFAULT_SYSFS_HIDRAW_BASE),
@@ -331,7 +302,7 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     /// Builds a synthetic sysfs tree mimicking the real `/sys/class/hidraw` + USB device
-    /// layout, under a fresh temp directory, so `discover_dock_hidraw`'s matching logic can be
+    /// layout, under a fresh temp directory, so `discover_with_ids`'s matching logic can be
     /// exercised without a real kernel or real hardware. Returns (sysfs_hidraw_base, dev_dir).
     ///
     /// Tree built:
@@ -401,7 +372,8 @@ mod tests {
         let sysfs_hidraw_base = base.join("class/hidraw");
         let dev_dir = base.join("dev");
 
-        let result = discover_dock_hidraw(&sysfs_hidraw_base, &dev_dir).unwrap();
+        let result =
+            discover_with_ids(&sysfs_hidraw_base, &dev_dir, &DeviceIds::default()).unwrap();
 
         assert_eq!(result.mi00.as_path(), dev_dir.join("hidraw0"));
         assert_eq!(result.mi01.as_path(), dev_dir.join("hidraw1"));
@@ -420,7 +392,8 @@ mod tests {
         // Remove the MI_01 hidraw entry to simulate it not being present.
         fs::remove_dir_all(sysfs_hidraw_base.join("hidraw1")).unwrap();
 
-        let err = discover_dock_hidraw(&sysfs_hidraw_base, &dev_dir).unwrap_err();
+        let err =
+            discover_with_ids(&sysfs_hidraw_base, &dev_dir, &DeviceIds::default()).unwrap_err();
         match err {
             DiscoveryError::Mi01NotFound => {}
             other => panic!("expected Mi01NotFound, got {other:?}"),
@@ -440,7 +413,8 @@ mod tests {
         fs::create_dir_all(&sysfs_hidraw_base).unwrap();
         let dev_dir = base.join("dev");
 
-        let err = discover_dock_hidraw(&sysfs_hidraw_base, &dev_dir).unwrap_err();
+        let err =
+            discover_with_ids(&sysfs_hidraw_base, &dev_dir, &DeviceIds::default()).unwrap_err();
         match err {
             DiscoveryError::NoDockInterfacesFound => {}
             other => panic!("expected NoDockInterfacesFound, got {other:?}"),

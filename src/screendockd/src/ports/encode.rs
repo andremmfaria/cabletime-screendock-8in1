@@ -33,10 +33,6 @@ impl VideoMessage {
         &self.bytes
     }
 
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
-    }
-
     /// True when the message bundles an IDR slice.
     pub fn is_keyframe(&self) -> bool {
         self.keyframe
@@ -55,9 +51,6 @@ pub enum EncodeError {
     /// The encoder library rejected a frame or failed while encoding.
     #[error("encoding failed: {0}")]
     Backend(String),
-    /// The input frame cannot be encoded.
-    #[error("invalid input frame: {0}")]
-    InvalidFrame(String),
     /// The encoder output did not split into dock messages.
     #[error("encoder output is not valid Annex-B: {0}")]
     AnnexB(#[from] AnnexBError),

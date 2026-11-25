@@ -3,8 +3,8 @@
 //!
 //! Subcommands:
 //! - `discover`: resolve and print the dock's MI_00/MI_01 hidraw nodes.
-//! - `replay`: Milestone 2 write-timing test against MI_01.
-//! - `isolate`: Milestone 3 heartbeat/video/both isolation test.
+//! - `replay`: write-timing test against MI_01.
+//! - `isolate`: heartbeat/video/both isolation test.
 //! - `capture`: grab N frames from the desktop and write them as PNG files.
 //! - `run`: the daemon, heartbeat plus capture, encode and write to the dock.
 //! - `bench`: capture plus encode CPU measurement, no dock needed.
@@ -12,8 +12,7 @@
 //! `docs/hardware-validation.md` describes how `replay`, `isolate` and `run` are used on the
 //! dock; `docs/daemon.md` describes the daemon itself.
 //!
-//! Per the Design Patterns section of `docs/implementation-plan.md` (pattern 7), this is the
-//! application boundary: it uses `anyhow` with context, while the library modules return typed
+//! This is the application boundary: it uses `anyhow` with context, while the library modules return typed
 //! errors. Any failure here exits nonzero.
 
 mod args;
@@ -56,14 +55,14 @@ struct Cli {
 enum Command {
     /// Resolve and print the dock's MI_00 and MI_01 hidraw nodes.
     Discover,
-    /// Milestone 2: replay a keyframe plus a 17-chunk message back-to-back on MI_01 and print
+    /// Replay a keyframe plus a 17-chunk message back-to-back on MI_01 and print
     /// per-chunk write timing.
     #[cfg(feature = "tools")]
     Replay(ReplayArgs),
-    /// Milestone 3: run heartbeat-only, video-only or both for a fixed duration.
+    /// Run heartbeat-only, video-only or both for a fixed duration.
     #[cfg(feature = "tools")]
     Isolate(IsolateArgs),
-    /// Milestone 4: capture frames from the desktop and write them as PNG files.
+    /// Capture frames from the desktop and write them as PNG files.
     Capture(CaptureArgs),
     /// Run the daemon: heartbeat on MI_00, capture, encode and write video to MI_01.
     Run(RunArgs),

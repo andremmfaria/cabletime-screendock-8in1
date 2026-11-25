@@ -2,7 +2,7 @@
 
 Status: partially validated on a real dock; the procedures below still require a person with the dock attached. Loopback tests against files and pipes say nothing about the dock's timing or rendering. Measurements from the procedures below are recorded by the person running them; none are recorded in this repository yet.
 
-Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation), the M5 CPU criterion, M6 (the streaming daemon) and M7 (resolution picker).
+Procedures covered: native write timing, heartbeat dependency isolation, the CPU criterion, the streaming daemon and the resolution picker.
 
 ## Verified on a real dock
 
@@ -28,9 +28,9 @@ Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation
 
 Without `--h264-file` the tools send synthetic filler messages: a 3577 byte keyframe-shaped message and a 67,666 byte (17 report) inter-frame-shaped message with the documented sizes and NAL layout. They are valid for timing and are not decodable video, so they will not produce a picture.
 
-## M2: native write timing
+## Native write timing
 
-Goal: show that a compiled client writing back-to-back with `write(2)` matches the chunk timing the research reports, and observe what the panel renders. The reference is 0.77 ms per chunk, at or below which the milestone's timing criterion is met.
+Goal: show that a compiled client writing back-to-back with `write(2)` matches the chunk timing the research reports, and observe what the panel renders. The reference is 0.77 ms per chunk, at or below which the timing criterion is met.
 
 ### Run A: timing with the research message sizes
 
@@ -58,12 +58,12 @@ The first command sends the whole stream unpaced, back-to-back. The second sends
 
 Record for each command what the panel shows: full picture, partial picture (describe which region), a single frame then nothing, the "Connecting Signal..." overlay, or nothing. Take a photo if possible. Also record the timing lines and, for the paced run, the number of late frames.
 
-### M2 exit criteria
+### Write timing exit criteria
 
 - Mean wall time per chunk at or below 0.77 ms. The captures show 0.76 to 0.91 ms per chunk on the wire; the replay output is a host-side write measure.
 - The panel renders the full picture of the stream rather than a partial region.
 
-## M3: heartbeat dependency isolation
+## Heartbeat dependency isolation
 
 Goal: observe on-screen behavior for each of three conditions, so it is known whether the heartbeat is needed for video to render or only suppresses the "Connecting Signal..." overlay.
 
@@ -87,7 +87,7 @@ For each condition record, with approximate timestamps relative to the start:
 
 The result to derive from the three records: whether video renders without the heartbeat (b), whether the heartbeat alone changes the panel (a), and whether (c) differs from (b) beyond the overlay.
 
-### M3 exit criteria
+### Heartbeat isolation exit criteria
 
 A written observation for all three conditions, not only (c).
 
@@ -102,7 +102,7 @@ Goal: confirm that `screendockd run` brings up the panel from a freshly plugged 
 
 Status: requires on-device validation of the Rust implementation. See the verified facts at the top of this page for what the Python prototype showed.
 
-## M5: CPU cost of capture plus encode
+## CPU cost of capture plus encode
 
 Goal: record the sustained CPU use of screen capture plus libx264 encoding at 25 fps and 1280x720. No dock is needed. Needs a build with `--features encode-ffmpeg` and an interactive session on the target host.
 
@@ -114,7 +114,7 @@ Run it once on an idle desktop and once while the desktop is busy (for example p
 
 Status: requires measurement on the target host. No figures are recorded in this repository.
 
-## M6: streaming daemon
+## Streaming daemon
 
 Goal: confirm the full pipeline puts the live desktop on the panel with the heartbeat running. Needs the dock, permissions set up and a build with `--features encode-ffmpeg`.
 
@@ -134,9 +134,9 @@ Exit criteria: the live desktop is visible and stays up for the whole run, shutd
 
 Status: requires on-device validation.
 
-## M7: resolution picker
+## Resolution picker
 
-Goal: confirm the panel accepts a configured size and renders it correctly. Needs the dock and the M6 setup. For each size below, set `display.width`, `display.height` and `display.orientation` in the config, run `screendockd run` for a few minutes and record what the panel shows:
+Goal: confirm the panel accepts a configured size and renders it correctly. Needs the dock and the streaming daemon setup. For each size below, set `display.width`, `display.height` and `display.orientation` in the config, run `screendockd run` for a few minutes and record what the panel shows:
 
 | `display.width` | `display.height` | `display.orientation` |
 |---|---|---|

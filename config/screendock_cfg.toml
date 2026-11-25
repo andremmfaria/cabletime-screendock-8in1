@@ -8,9 +8,8 @@
 # system-wide file is the fallback default until a user has their own
 # ~/.config/screendockd/screendock_cfg.toml.
 #
-# Values below match the dock's confirmed native panel resolution and this project's current
-# milestone defaults; see docs/implementation-plan.md for the fields this config is expected to
-# grow into as later milestones (capture/encode/heartbeat) are implemented.
+# Values below match the dock's confirmed native panel resolution and this project's defaults; see
+# docs/configuration.md for every field.
 
 [display]
 # Encoded picture size in pixels. Defaults to the dock's native panel size. Both must be even,

@@ -30,9 +30,6 @@ pub enum SessionError {
     /// The dock answered `notify-projection-started` with something other than `isAllowed`.
     #[error("dock denied projection: {0}")]
     Denied(String),
-    /// The MI_00 reader stopped (read error or end of stream).
-    #[error("MI_00 reader stopped: {0}")]
-    ReaderStopped(String),
     /// A session thread panicked.
     #[error("{0} thread panicked")]
     Panicked(&'static str),

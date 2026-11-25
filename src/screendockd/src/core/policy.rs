@@ -2,9 +2,6 @@
 
 use std::time::Duration;
 
-/// Default heartbeat tick interval when the config doesn't override it.
-pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1000);
-
 /// How long to wait for the dock's ready announcement before deciding whether it already
 /// holds a session.
 pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(3);

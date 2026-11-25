@@ -1,11 +1,9 @@
 //! Direct `write(2)`/`read(2)` I/O against the resolved MI_00/MI_01 `/dev/hidrawN` nodes.
 //!
-//! Per `docs/implementation-plan.md`'s "hidraw access" section this intentionally does *not*
-//! use the `hidapi` crate or any `ioctl`/"set report" call: each chunk is one plain `write(2)`
-//! on the node, back-to-back, with no buffering layer in between (the write-timing risk the
-//! plan's Milestone 2 exists to validate).
+//! This intentionally does *not* use the `hidapi` crate or any `ioctl`/"set report" call: each chunk is one plain `write(2)`
+//! on the node, back-to-back, with no buffering layer in between.
 //!
-//! Design Patterns applied (see the plan's Design Patterns section):
+//! Design notes:
 //! - (pattern 6, RAII) `HidrawHandle` owns a `std::fs::File`, which already closes its fd on
 //!   drop; no manual `Drop` is added and no method exposes the raw fd.
 //! - (pattern 5, parse at the boundary) the read side runs every inbound report through
