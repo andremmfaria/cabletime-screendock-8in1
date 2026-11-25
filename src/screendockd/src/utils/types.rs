@@ -58,6 +58,46 @@ pub struct DisplayConfig {
     pub orientation: String,
 }
 
+/// Whether the dock shows a copy of an existing screen or its own monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplayMode {
+    /// Capture an existing screen or region and scale it to the dock.
+    #[default]
+    Mirror,
+    /// Create a virtual monitor for the dock and capture exactly that monitor.
+    Extend,
+}
+
+/// Where the virtual monitor sits relative to its anchor output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+pub enum Placement {
+    #[default]
+    #[serde(rename = "right-of")]
+    RightOf,
+    #[serde(rename = "left-of")]
+    LeftOf,
+    #[serde(rename = "above")]
+    Above,
+    #[serde(rename = "below")]
+    Below,
+    /// At the configured `x` and `y`.
+    #[serde(rename = "at")]
+    At,
+}
+
+/// Which Wayland mechanism provides the virtual monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaylandBackend {
+    /// Pick by the compositor: Mutter on GNOME, wlroots headless output on sway, else the portal.
+    #[default]
+    Auto,
+    Mutter,
+    Portal,
+    Wlroots,
+}
+
 /// Which capture backend to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]

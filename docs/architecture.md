@@ -41,6 +41,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `adapters::encode` | Message policy (`messages_from_packet`), `create_encoder`, libx264 encoder (`adapters::encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`adapters::encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
 | `core::policy` | Session timing defaults and polling constants | Implemented |
+| `core::reconfig` | The live settings model: `LiveSettings` (every setting that can change while the daemon runs), `SettingsPatch` (a validated partial change), `ChangeClass`, `ReconfigAction`, `ReconfigPlan` and the pure `plan_change`. See [Live settings and change classes](#live-settings-and-change-classes) | Implemented, unit tested |
 | `app::daemon` | The dock session plus the capture, encode, frame and write loop with the error policy; video is written only while the session is armed. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
 | `tools::bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `ports::capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait and `CaptureError`. See [capture.md](capture.md) | Implemented, unit tested |
@@ -52,10 +53,11 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 
 | Directory | `types.rs` holds |
 |---|---|
-| `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
+| `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `DisplayMode`, `Placement`, `WaylandBackend`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
 | `protocol` | `ReportId`, `FrameHeader`, `ParsedMessage`, `MessageBuilder`, `FramingError`, the report size constants, `AnnexBError`, the NAL type constants, `Orientation`, `DisplayGeometry`, `DisplayError`, `SessionId`, `SessionIdError`, `DockMessage`, `InboundAssembler`, the host message constants |
 | `ports` | `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
 | `core` | the session timing defaults and polling constants |
+| `core::reconfig` | `LiveSettings`, `SettingsPatch`, `SettingsError`, `ChangeClass`, `ReconfigAction`, `ReconfigPlan`, `PlanOptions` and the range limits |
 | `core::session` | `Session`, `SessionState`, `SessionHandle`, `SessionStats`, `SessionSettings`, `SessionError`, the shared state, the controller and reader event types |
 | `adapters` | nothing of its own; the subdirectories hold the adapter types |
 | `adapters::capture` | `SessionType`, `BackendKind`, `X11ShmCapture`, `WaylandPortalCapture` and the Wayland stream state |
@@ -65,6 +67,25 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 | `cli` | the clap argument structs and enums and the parsed command |
 | `tools` | the replay, isolate, heartbeat and bench parameter, report and statistics types and their errors |
 | `testing` | `FakeDock`, `FakeDockConfig`, `StartedReply`, `VideoStats` and the fake dock state |
+
+## Live settings and change classes
+
+`core::reconfig::LiveSettings` holds the validated values that can change while the daemon runs: picture size and orientation, frame rate, preset, tune, bit rate, VBV buffer, keyframe interval, display mode, monitor placement, anchor, position, name, Wayland backend and the follow setting. `LiveSettings::try_from(&Config)` builds it from the config, and `SettingsPatch::apply_to` yields a new validated value from a partial change without touching the old one. `SettingsPatch::between` turns two settings into the patch of their differences.
+
+`plan_change(old, new)` is pure and returns a `ReconfigPlan`: a `ChangeClass` and the ordered `ReconfigAction` list. The class is the highest class among the changed settings.
+
+| Change | Class | Actions |
+|---|---|---|
+| bit rate, VBV buffer | live when the encoder changes its rate in place, else rebuild | `SetRate`, or `RebuildEncoder` |
+| keyframe interval | live | `SetKeyframeInterval` |
+| frame rate, preset, tune | rebuild | `RebuildEncoder` |
+| width, height, orientation | dock cycle | `RebuildEncoder`, `RetargetCapture` and `ResizeMonitor` in extend mode, `RunDockCycle` |
+| mirror to extend or back | rebuild, dock cycle when the picture size changes too | `CreateMonitor` or `DestroyMonitor`, `RebuildEncoder`, `RetargetCapture` |
+| placement, anchor, position in extend mode | live | `RetargetCapture` |
+| monitor name or Wayland backend in extend mode | rebuild | `RecreateMonitor`, `RetargetCapture`, `RebuildEncoder` |
+| follow system changes | live | `SetFollow` |
+
+Placement, name and backend changes in mirror mode need no action; the new values are kept for the next switch to extend. A plan with no actions is a no-op.
 
 ## Cargo features
 
