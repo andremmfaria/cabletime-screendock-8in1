@@ -18,11 +18,11 @@ use screendockd::protocol::framing::{
     REPORT_SIZE,
 };
 
-fn fixture() -> PathBuf {
+pub(crate) fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.h264")
 }
 
-fn config() -> String {
+pub(crate) fn config() -> String {
     format!(
         "{}/../../config/screendock_cfg.toml",
         env!("CARGO_MANIFEST_DIR")
@@ -30,13 +30,13 @@ fn config() -> String {
 }
 
 /// Creates empty regular files standing in for the hidraw nodes (a real node always exists).
-fn make_nodes(dir: &Path) {
+pub(crate) fn make_nodes(dir: &Path) {
     for name in ["mi00", "mi01"] {
         std::fs::write(dir.join(name), b"").unwrap();
     }
 }
 
-fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
+pub(crate) fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
     Command::new(env!("CARGO_BIN_EXE_screendockd"))
         .args([
             "--config",
@@ -54,6 +54,7 @@ fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
         .arg("--no-handshake")
         .args(extra)
         .env("DISPLAY", display)
+        .env("XDG_RUNTIME_DIR", dir)
         .env_remove("WAYLAND_DISPLAY")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -61,7 +62,7 @@ fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
         .expect("spawn screendockd run")
 }
 
-fn wait_exit(child: &mut Child, limit: Duration) -> std::process::ExitStatus {
+pub(crate) fn wait_exit(child: &mut Child, limit: Duration) -> std::process::ExitStatus {
     let start = Instant::now();
     loop {
         if let Some(status) = child.try_wait().expect("poll child") {

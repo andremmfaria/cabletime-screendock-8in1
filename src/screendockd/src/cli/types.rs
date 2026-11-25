@@ -40,6 +40,29 @@ pub(super) enum Command {
     /// Measure CPU time of capture plus encode over a fixed duration (no dock needed).
     #[cfg(feature = "tools")]
     Bench(BenchArgs),
+    /// Talk to a running daemon through its control socket.
+    Ctl(CtlArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct CtlArgs {
+    /// Control socket path, overriding `control.socket` and the default under
+    /// `$XDG_RUNTIME_DIR`.
+    #[arg(long, value_name = "PATH")]
+    pub(super) socket: Option<PathBuf>,
+    #[command(subcommand)]
+    pub(super) action: CtlAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum CtlAction {
+    /// Print the daemon's state and every setting.
+    Status,
+    /// Print one setting, or all of them.
+    Get {
+        /// Setting name, for example `bitrate`. Without it every setting is printed.
+        key: Option<String>,
+    },
 }
 
 #[derive(Debug, Args)]

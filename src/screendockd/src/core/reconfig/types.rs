@@ -85,6 +85,15 @@ pub enum SettingsError {
         min: i64,
         max: i64,
     },
+    /// The key names no setting.
+    #[error("unknown setting {0:?}")]
+    UnknownKey(String),
+    /// The value cannot be read as the setting's type.
+    #[error("{key} must be {expected}")]
+    InvalidValue {
+        key: &'static str,
+        expected: &'static str,
+    },
     /// A text value is not acceptable.
     #[error("{key} {reason}")]
     InvalidText {
@@ -148,4 +157,25 @@ impl Default for PlanOptions {
     fn default() -> Self {
         Self { live_rate: true }
     }
+}
+
+/// A setting as the control interface names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SettingKey {
+    Resolution,
+    Orientation,
+    Fps,
+    Preset,
+    Tune,
+    Bitrate,
+    VbvBufferMs,
+    KeyframeInterval,
+    Mode,
+    Placement,
+    Anchor,
+    X,
+    Y,
+    Name,
+    WaylandBackend,
+    FollowSystemChanges,
 }

@@ -1,0 +1,72 @@
+# Control
+
+A running `screendockd run` serves a control socket. `screendockd ctl` is the client; any program that speaks the line format below can use the socket as well.
+
+## Socket
+
+The socket path is `control.socket` from the config, or `$XDG_RUNTIME_DIR/screendockd/control.sock` when that is empty. `--socket PATH` on `ctl` overrides both. With `control.enabled = false`, or when neither a configured path nor `$XDG_RUNTIME_DIR` exists, the daemon serves no socket.
+
+- The daemon creates a missing parent directory with mode 0700 and gives the socket mode 0600, so only the owning user can connect.
+- A socket file left by a daemon that is gone is replaced at startup. A socket that still answers makes startup fail with an error, and a path that exists and is not a socket is never removed.
+- The path must fit a Unix socket address (107 bytes).
+- The daemon removes the socket file when it exits normally.
+
+## Wire format
+
+One connection carries one request and one response, each a single JSON object on one line ending in a newline. A request line is limited to 4096 bytes, including the newline; a longer line is answered with `invalid` and never reaches the daemon. Unknown fields are rejected. Requests carry a `cmd` field.
+
+| Request | Fields |
+|---|---|
+| `{"cmd":"status"}` | none |
+| `{"cmd":"get"}` or `{"cmd":"get","key":"bitrate"}` | optional `key` |
+| `{"cmd":"set","key":"bitrate","value":"2000"}` | `key`, `value` |
+| `{"cmd":"reload"}` | none |
+
+Responses carry a `result` field.
+
+| Response | Fields | Meaning |
+|---|---|---|
+| `status` | `fields`: map of text to text | The daemon's state and every setting |
+| `values` | `values`: map of text to text | The requested settings |
+| `applied` | `class`, `changed`: list of setting names | The change was applied |
+| `rejected` | `reason`, `rolled_back` | A valid request the daemon did not apply |
+| `invalid` | `reason` | The request was not understood, names an unknown setting or holds a value that is out of range |
+
+Request text from clients is never used as a path or format string. Names echoed in an error are cut to 40 characters.
+
+## Commands
+
+```text
+screendockd [--config PATH] ctl [--socket PATH] status
+screendockd [--config PATH] ctl [--socket PATH] get [KEY]
+```
+
+`status` prints `name: value` lines: every setting plus `version` and `pid`. `get` without a key prints every setting in the same form; `get KEY` prints only the value. A command that fails prints its reason on standard error.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | The request succeeded |
+| 1 | `ctl` itself failed (no socket path, unreadable config, protocol error) |
+| 2 | The daemon rejected the request |
+| 3 | No daemon answers on the socket |
+| 4 | The request was invalid |
+
+## Settings
+
+| Key | Value | Setting |
+|---|---|---|
+| `resolution` | `WIDTHxHEIGHT` | `display.width` and `display.height` |
+| `orientation` | `landscape` or `portrait` | `display.orientation` |
+| `fps` | whole number, 0 to 240 | `capture.fps` |
+| `preset` | libx264 preset name | `encode.preset` |
+| `tune` | `true` or `false` | `encode.tune_zerolatency` |
+| `bitrate` | kbit/s, 1 to 100000 | `encode.bitrate_kbps` |
+| `vbv-buffer-ms` | milliseconds, 0 to 10000 | `encode.vbv_buffer_ms` |
+| `keyframe-interval` | frames, 1 to 3600 | `encode.keyframe_interval` |
+| `mode` | `mirror` or `extend` | `virtual_display.mode` |
+| `placement` | `right-of`, `left-of`, `above`, `below` or `at` | `virtual_display.placement` |
+| `anchor` | output name or `primary` | `virtual_display.anchor` |
+| `x`, `y` | whole number within plus or minus 32767 | `virtual_display.x`, `virtual_display.y` |
+| `name` | printable ASCII up to 64 bytes | `virtual_display.name` |
+| `wayland-backend` | `auto`, `mutter`, `portal` or `wlroots` | `virtual_display.wayland_backend` |
+| `follow-system-changes` | `true` or `false` | `virtual_display.follow_system_changes` |

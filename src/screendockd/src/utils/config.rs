@@ -79,6 +79,82 @@ impl X264Preset {
     }
 }
 
+impl X264Preset {
+    /// Parses a preset name as written in the config file.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "ultrafast" => Self::Ultrafast,
+            "superfast" => Self::Superfast,
+            "veryfast" => Self::Veryfast,
+            "faster" => Self::Faster,
+            "fast" => Self::Fast,
+            "medium" => Self::Medium,
+            _ => return None,
+        })
+    }
+}
+
+impl DisplayMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mirror => "mirror",
+            Self::Extend => "extend",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "mirror" => Some(Self::Mirror),
+            "extend" => Some(Self::Extend),
+            _ => None,
+        }
+    }
+}
+
+impl Placement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RightOf => "right-of",
+            Self::LeftOf => "left-of",
+            Self::Above => "above",
+            Self::Below => "below",
+            Self::At => "at",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "right-of" => Self::RightOf,
+            "left-of" => Self::LeftOf,
+            "above" => Self::Above,
+            "below" => Self::Below,
+            "at" => Self::At,
+            _ => return None,
+        })
+    }
+}
+
+impl WaylandBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Mutter => "mutter",
+            Self::Portal => "portal",
+            Self::Wlroots => "wlroots",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "auto" => Self::Auto,
+            "mutter" => Self::Mutter,
+            "portal" => Self::Portal,
+            "wlroots" => Self::Wlroots,
+            _ => return None,
+        })
+    }
+}
+
 /// Resolves the config file path per the 4-step order documented at the top of this module,
 /// without reading or parsing it. Exposed separately from `load()` so callers/tests can inspect
 /// which path would be used without requiring a file to actually exist there.

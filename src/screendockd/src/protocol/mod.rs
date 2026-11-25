@@ -2,6 +2,7 @@
 //! messages, and parsing of the dock's messages. Nothing here performs I/O.
 
 pub mod annexb;
+pub mod control;
 pub mod display;
 pub mod framing;
 pub mod heartbeat;

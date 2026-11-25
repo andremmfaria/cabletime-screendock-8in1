@@ -2,11 +2,13 @@
 
 use std::io;
 use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use thiserror::Error;
 
 use crate::protocol::annexb::AnnexBError;
+use crate::protocol::control::{ControlRequest, ControlResponse};
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::{FramingError, ParsedMessage, ReportId, REPORT_SIZE};
 use crate::utils::config::X264Preset;
@@ -276,4 +278,44 @@ pub struct DisplayFacts {
     pub portal_source_types: Option<u32>,
     /// A sway IPC socket is reachable.
     pub sway_socket: bool,
+}
+
+/// Work for the daemon's supervisor, from the control server or a signal handler.
+#[derive(Debug)]
+pub enum Command {
+    /// A control request; the answer goes back through `reply`.
+    Request {
+        request: ControlRequest,
+        reply: Sender<ControlResponse>,
+    },
+    /// Re-read the config file (SIGHUP). No answer is sent.
+    Reload,
+}
+
+/// Errors from the control socket, on the server and the client side.
+#[derive(Debug, Error)]
+pub enum ControlError {
+    /// No daemon answers on the socket.
+    #[error("no daemon is listening on {path:?}: {source}")]
+    Unreachable { path: PathBuf, source: io::Error },
+    /// Another daemon already serves the socket.
+    #[error("another daemon already serves {0:?}")]
+    AlreadyRunning(PathBuf),
+    /// The path exists and is not a socket.
+    #[error("{0:?} exists and is not a socket")]
+    NotASocket(PathBuf),
+    /// The path does not fit a Unix socket address.
+    #[error("socket path {0:?} is too long")]
+    PathTooLong(PathBuf),
+    /// Socket I/O failed.
+    #[error("control socket i/o failed: {0}")]
+    Io(#[from] io::Error),
+    /// The peer sent something that is not a control message.
+    #[error("control protocol error: {0}")]
+    Wire(String),
+}
+
+/// Sends one control request to a running daemon and returns its answer.
+pub trait ControlClient {
+    fn send(&self, request: &ControlRequest) -> Result<ControlResponse, ControlError>;
 }

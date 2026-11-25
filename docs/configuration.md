@@ -68,6 +68,7 @@ capture [--frames N] [--out-dir DIR] [--backend auto|x11|wayland]
 run     [--mi00 PATH] [--mi01 PATH] [--h264-file PATH] [--backend auto|x11|wayland]
         [--max-frames N] [--no-handshake]
 bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
+ctl     [--socket PATH] status | get [KEY]
 ```
 
 | Option | Default | Meaning |
@@ -85,8 +86,9 @@ bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
 | `--out-dir` | current directory | Directory for `capture` output, created if missing |
 | `--backend` | `capture.backend` | Capture backend for this run |
 | `--max-frames` | unlimited | `run` stops after this many frames |
+| `--socket` | `control.socket` | `ctl` control socket path |
 
-Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `replay` opens MI_00 as well, to run the handshake, unless `--no-handshake` is given. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). `bench` takes `--duration-secs` like `isolate`.
+Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `replay` opens MI_00 as well, to run the handshake, unless `--no-handshake` is given. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). `bench` takes `--duration-secs` like `isolate`. `ctl` is described in [control.md](control.md).
 
 ## Permissions
 

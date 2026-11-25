@@ -1,6 +1,9 @@
 //! Types, enums and constants of the wire protocol: framing, Annex-B, display geometry, the
 //! heartbeat and the dock message values.
 
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -244,3 +247,54 @@ pub const MOUSE_ICON_CHANGE: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_
 
 /// The reply to the dock's EDID passthrough (id 101): passthrough id 103 with data `AQ==`.
 pub const EDID_ACK: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n";
+
+/// Longest accepted control request line in bytes, newline included.
+pub const MAX_REQUEST_LINE: usize = 4096;
+
+/// Longest accepted control response line in bytes, newline included.
+pub const MAX_RESPONSE_LINE: usize = 65_536;
+
+/// A request to the running daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ControlRequest {
+    /// The daemon's state and every setting.
+    Status {},
+    /// One setting, or all of them when no key is given.
+    Get {
+        #[serde(default)]
+        key: Option<String>,
+    },
+    /// Change one setting.
+    Set { key: String, value: String },
+    /// Re-read the config file and apply the differences.
+    Reload {},
+}
+
+/// The daemon's answer to one request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ControlResponse {
+    /// Answer to `status`.
+    Status { fields: BTreeMap<String, String> },
+    /// Answer to `get`.
+    Values { values: BTreeMap<String, String> },
+    /// The change was applied: its class and the settings it changed.
+    Applied { class: String, changed: Vec<String> },
+    /// The change is valid but was not applied. `rolled_back` is true when part of it had
+    /// been applied and was undone.
+    Rejected { reason: String, rolled_back: bool },
+    /// The request was not understood or holds an invalid value.
+    Invalid { reason: String },
+}
+
+/// Errors from reading a control line.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ControlWireError {
+    /// The line is at or over the size cap.
+    #[error("control line is over the {max} byte limit")]
+    TooLarge { max: usize },
+    /// The line is not a valid message.
+    #[error("invalid control message: {0}")]
+    Json(String),
+}
