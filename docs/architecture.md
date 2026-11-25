@@ -26,13 +26,13 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `ports::transport` | `DockTransport` trait (channel, `write_chunks`, `read_report`, `read_message`, `wait_readable`, `try_clone`), `TransportError` and `WriteTimings` | Implemented |
 | `adapters::transport::hidraw` | `HidrawHandle`, the `DockTransport` implementation: owns one open node, writes chunks with `write(2)`, reads and parses messages, duplicates the descriptor (`try_clone`) and waits for readability with `poll(2)` (`wait_readable`) | Implemented, loopback tested. Requires on-device validation |
 | `protocol::heartbeat` | The `SessionId` newtype and the exact heartbeat text | Implemented, unit tested |
-| `heartbeat` | `run_heartbeat_loop`: a paced send loop on MI_00 used by the validation tools | Implemented, loopback tested |
+| `tools::heartbeat_loop` | `run_heartbeat_loop`: a paced send loop on MI_00 used by the validation tools | Implemented, loopback tested |
 | `protocol::messages` | Exact bytes of every host message on MI_00 other than the heartbeat | Implemented, unit tested |
 | `protocol::inbound` | `InboundAssembler` and `parse_dock_message`: reassembly and classification of the dock's MI_00 messages | Implemented, unit tested |
 | `core::session` | The MI_00 dock session over any `DockTransport`: `Session`, `SessionHandle`, `SessionState`, `SessionSettings` and the handshake state machine, split into `settings`, `state`, `events`, `reader`, `heartbeat` and `controller` modules. See [protocol-implementation.md](protocol-implementation.md#session-handshake) |
-| `fake_dock` | A simulated dock over Unix datagram socket pairs, used by session, daemon and validation tests. Not used by the daemon | Implemented, loopback tested. Requires on-device validation |
+| `testing::fake_dock` | A simulated dock over Unix datagram socket pairs, used by session, daemon and validation tests. Not used by the daemon | Implemented, loopback tested. Requires on-device validation |
 | `protocol::annexb` | Splits an Annex-B H.264 stream into dock messages (keyframe bundle, single inter-frame NALs) | Implemented, unit tested |
-| `validation` | Replay timing and heartbeat isolation routines used by the CLI. They run the dock session first when video is sent with an MI_00 handle | Implemented, loopback tested. Requires on-device validation |
+| `tools::validation` | Replay timing and heartbeat isolation routines used by the CLI. They run the dock session first when video is sent with an MI_00 handle | Implemented, loopback tested. Requires on-device validation |
 | `config` | Loads the TOML config through a four step path resolution | Implemented |
 | `telemetry::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
 | `ports::encode` | `Encoder` trait, `VideoMessage`, `EncoderSettings` and `EncodeError`. See [encoding.md](encoding.md) | Implemented |
@@ -40,9 +40,18 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
 | `core::policy` | Session timing defaults and polling constants | Implemented |
 | `app::daemon` | The dock session plus the capture, encode, frame and write loop with the error policy; video is written only while the session is armed. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
-| `bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
+| `tools::bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `ports::capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait and `CaptureError`. See [capture.md](capture.md) | Implemented, unit tested |
 | `adapters::capture` | `create_backend` and session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
+
+## Cargo features
+
+| Feature | Default | Effect |
+|---|---|---|
+| `tools` | yes | Compiles the `tools` module and the `replay`, `isolate` and `bench` subcommands. Without it the library and the `discover`, `capture` and `run` commands still build, which shows that core, ports, adapters and app do not depend on the tools |
+| `testing` | no | Compiles `testing::fake_dock`. The crate enables it for its own tests through a dev-dependency on itself, so `cargo test` always includes it and a normal or release build never does |
+| `capture-wayland` | no | Wayland capture backend |
+| `encode-ffmpeg` | no | libx264 encoder |
 
 ## Layering rules
 

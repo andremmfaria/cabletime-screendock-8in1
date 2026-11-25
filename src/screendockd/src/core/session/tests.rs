@@ -2,10 +2,10 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::adapters::transport::hidraw::HidrawHandle;
-use crate::fake_dock::{FakeDock, FakeDockConfig, StartedReply};
 use crate::protocol::framing::{PictureSize, ReportId};
 use crate::protocol::heartbeat::SessionId;
 use crate::protocol::messages;
+use crate::testing::fake_dock::{FakeDock, FakeDockConfig, StartedReply};
 
 fn size() -> PictureSize {
     PictureSize::new(1280, 720)

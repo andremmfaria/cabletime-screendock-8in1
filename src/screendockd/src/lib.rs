@@ -8,12 +8,12 @@
 
 pub mod adapters;
 pub mod app;
-pub mod bench;
 pub mod config;
 pub mod core;
-pub mod fake_dock;
-pub mod heartbeat;
 pub mod ports;
 pub mod protocol;
 pub mod telemetry;
-pub mod validation;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+#[cfg(feature = "tools")]
+pub mod tools;

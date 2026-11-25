@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "0.9.7"
+version = "0.9.8"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -72,12 +72,19 @@ signal-hook = "0.4"
 libc = "0.2"
 
 [features]
-default = []
+default = ["tools"]
+# Hardware validation and measurement tools: the replay, isolate and bench subcommands and
+# the tools module.
+tools = []
+# testing::fake_dock for tests; enabled only through the self dev-dependency, never in a
+# shipped build.
+testing = []
 capture-wayland = ["dep:ashpd", "dep:pipewire", "dep:tokio"]
 encode-ffmpeg = ["dep:ffmpeg-next"]
 
 [dev-dependencies]
 tempfile = "3"
+screendockd = { path = ".", features = ["testing"] }
 
 # Packaging metadata for `cargo-deb` (CI builds this via `cargo deb`, see
 # .github/workflows/package.yml). The daemon is installed as a per-user systemd unit

@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use crate::core::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
-use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
 use crate::ports::transport::{DockTransport, TransportError};
 use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
 use crate::protocol::heartbeat::SessionId;
+use crate::tools::heartbeat_loop::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
 
 /// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
 /// Milestone 2 exit criterion is at or below this figure.
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn isolate_both_with_session_waits_for_the_handshake_before_video() {
-        use crate::fake_dock::{FakeDock, FakeDockConfig};
+        use crate::testing::fake_dock::{FakeDock, FakeDockConfig};
         let (dock, mut mi00, mut mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
         let mut p = params(IsolateMode::Both);
         p.duration = Duration::from_millis(1500);

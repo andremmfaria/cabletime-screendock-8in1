@@ -48,6 +48,22 @@ jobs:
       - name: Build (cargo build)
         run: cargo build --verbose
 
+      # The core, ports, adapters and app layers must build without the tools feature.
+      - name: Lint without default features
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+      - name: Build without default features
+        run: cargo build --no-default-features
+
+      # The testing feature is enabled only through the dev-dependency, so a shipped build
+      # must not list it.
+      - name: Check the shipped feature graph
+        run: |
+          if cargo tree -e normal,features -f '{p} {f}' | grep -q testing; then
+            echo "the testing feature is enabled in a normal build"
+            exit 1
+          fi
+
       # SCREENDOCK_REQUIRE_XVFB turns "Xvfb missing or unusable" from a skip into a failure, so
       # the X11 capture tests cannot silently stop running in CI.
       - name: Test (cargo test)

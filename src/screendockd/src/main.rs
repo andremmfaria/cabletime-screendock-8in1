@@ -30,16 +30,21 @@ use screendockd::adapters::transport::discovery::{
 };
 use screendockd::adapters::transport::hidraw::HidrawHandle;
 use screendockd::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
-use screendockd::bench::run_bench;
 use screendockd::config::{self, CaptureBackendChoice, Config};
-use screendockd::core::session::{Session, SessionSettings};
+#[cfg(feature = "tools")]
+use screendockd::core::session::Session;
+use screendockd::core::session::SessionSettings;
 use screendockd::ports::encode::EncoderSettings;
+#[cfg(feature = "tools")]
 use screendockd::ports::transport::DockTransport;
 use screendockd::protocol::annexb::messages_from_annexb;
 use screendockd::protocol::display::DisplayGeometry;
 use screendockd::protocol::framing::PictureSize;
 use screendockd::telemetry::logging::init_logging;
-use screendockd::validation::{
+#[cfg(feature = "tools")]
+use screendockd::tools::bench::run_bench;
+#[cfg(feature = "tools")]
+use screendockd::tools::validation::{
     run_isolate, run_replay, synthetic_interframe, synthetic_keyframe_bundle, wait_until_armed,
     IsolateMode, IsolateParams,
 };
@@ -62,14 +67,17 @@ enum Command {
     Discover,
     /// Milestone 2: replay a keyframe plus a 17-chunk message back-to-back on MI_01 and print
     /// per-chunk write timing.
+    #[cfg(feature = "tools")]
     Replay(ReplayArgs),
     /// Milestone 3: run heartbeat-only, video-only or both for a fixed duration.
+    #[cfg(feature = "tools")]
     Isolate(IsolateArgs),
     /// Milestone 4: capture frames from the desktop and write them as PNG files.
     Capture(CaptureArgs),
     /// Run the daemon: heartbeat on MI_00, capture, encode and write video to MI_01.
     Run(RunArgs),
     /// Measure CPU time of capture plus encode over a fixed duration (no dock needed).
+    #[cfg(feature = "tools")]
     Bench(BenchArgs),
 }
 
@@ -115,6 +123,7 @@ struct HandshakeArgs {
     no_handshake: bool,
 }
 
+#[cfg(feature = "tools")]
 #[derive(Debug, Args)]
 struct BenchArgs {
     #[command(flatten)]
@@ -183,6 +192,7 @@ struct StreamArgs {
     h264_file: Option<PathBuf>,
 }
 
+#[cfg(feature = "tools")]
 #[derive(Debug, Args)]
 struct ReplayArgs {
     #[command(flatten)]
@@ -196,6 +206,7 @@ struct ReplayArgs {
     handshake: HandshakeArgs,
 }
 
+#[cfg(feature = "tools")]
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum ModeArg {
     Heartbeat,
@@ -203,6 +214,7 @@ enum ModeArg {
     Both,
 }
 
+#[cfg(feature = "tools")]
 impl From<ModeArg> for IsolateMode {
     fn from(mode: ModeArg) -> Self {
         match mode {
@@ -213,6 +225,7 @@ impl From<ModeArg> for IsolateMode {
     }
 }
 
+#[cfg(feature = "tools")]
 #[derive(Debug, Args)]
 struct IsolateArgs {
     #[command(flatten)]
@@ -269,6 +282,7 @@ fn resolve_nodes(
 }
 
 /// Messages from `--h264-file`, or the synthetic keyframe bundle plus 17-chunk inter-frame.
+#[cfg(feature = "tools")]
 fn load_messages(stream: &StreamArgs) -> Result<Vec<Vec<u8>>> {
     match &stream.h264_file {
         Some(path) => {
@@ -350,6 +364,7 @@ fn main() -> Result<()> {
             println!("MI_00 (control):  {}", paths.mi00.display());
             println!("MI_01 (video):    {}", paths.mi01.display());
         }
+        #[cfg(feature = "tools")]
         Command::Replay(args) => {
             let handshake = !args.handshake.no_handshake;
             let (mi00, mi01) = resolve_nodes(&device_ids(&config)?, &args.nodes, handshake, true)?;
@@ -385,6 +400,7 @@ fn main() -> Result<()> {
             }
             println!("{}", result.context("replay failed")?);
         }
+        #[cfg(feature = "tools")]
         Command::Isolate(args) => {
             let mode = IsolateMode::from(args.mode);
             let (need_mi00, need_mi01) = match mode {
@@ -514,6 +530,7 @@ fn main() -> Result<()> {
             .context("daemon failed")?;
             println!("{report:?}");
         }
+        #[cfg(feature = "tools")]
         Command::Bench(args) => {
             if args.duration_secs == 0 {
                 bail!("--duration-secs must be greater than zero");

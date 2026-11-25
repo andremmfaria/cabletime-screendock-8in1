@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
 use screendockd::app::daemon::{run, DaemonParams, DaemonReport};
 use screendockd::core::session::SessionSettings;
-use screendockd::fake_dock::{FakeDock, FakeDockConfig};
 use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::ports::encode::EncoderSettings;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
+use screendockd::testing::fake_dock::{FakeDock, FakeDockConfig};
 
 struct Solid;
 

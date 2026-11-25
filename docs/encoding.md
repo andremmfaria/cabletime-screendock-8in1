@@ -55,7 +55,7 @@ Verification: `tests/encode_ffmpeg.rs` encodes a 30 frame synthetic sequence fro
 
 ## CPU measurement
 
-The `bench` command measures the CPU cost of capture plus encode, the M5 CPU criterion. It runs the capture backend and the encoder back to back for a fixed time and reports frames, achieved frame rate, wall time, process CPU time (user and system, from `getrusage`) and CPU as a percentage of one core, plus the wall time spent in capture and in encode. HID writes are not part of the measurement and no dock is needed.
+The `bench` command (`tools::bench`, feature `tools`) measures the CPU cost of capture plus encode, the M5 CPU criterion. It runs the capture backend and the encoder back to back for a fixed time and reports frames, achieved frame rate, wall time, process CPU time (user and system, from `getrusage`) and CPU as a percentage of one core, plus the wall time spent in capture and in encode. HID writes are not part of the measurement and no dock is needed.
 
 ```text
 screendockd bench --duration-secs 60

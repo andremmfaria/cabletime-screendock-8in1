@@ -28,8 +28,9 @@ The binary is `target/release/screendockd`. Cargo features:
 |---|---|---|
 | `encode-ffmpeg` | The libx264 encoder. Without it `run` needs `--h264-file` | libav development files, libx264, clang |
 | `capture-wayland` | Wayland capture through xdg-desktop-portal and PipeWire | libpipewire and libspa development files, clang |
+| `tools` (default) | The `replay`, `isolate` and `bench` commands | none |
 
-The default build (no features) captures X11, replays prerecorded H.264 files and runs every validation command, using only pure Rust dependencies.
+The default build (only `tools`) captures X11, replays prerecorded H.264 files and runs every validation command, using only pure Rust dependencies.
 
 ## Install from a package
 
