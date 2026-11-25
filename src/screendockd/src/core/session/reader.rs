@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 use tracing::{debug, warn};
 
-use super::events::DockEvent;
+use super::types::DockEvent;
 use super::{send_control, SessionState, Shared, SharedWriter};
 use crate::core::policy::POLL_SLICE;
 use crate::ports::transport::DockTransport;

@@ -39,35 +39,12 @@
 //!   chunk list.
 //! - `FramingError` derives its `Display`/`Error` impls with `thiserror`.
 
-use thiserror::Error;
-
-/// Fixed HID report buffer size for this device's interrupt transport.
-pub const REPORT_SIZE: usize = 4096;
-
-/// Size of the header present at the start of every report (first and continuation).
-pub const HEADER_SIZE: usize = 16;
-
-/// Maximum payload bytes carried by a first report (`REPORT_SIZE - HEADER_SIZE`).
-pub const FIRST_CHUNK_PAYLOAD_MAX: usize = REPORT_SIZE - HEADER_SIZE;
-
-/// Maximum payload bytes carried by a continuation report. Continuation reports carry the same
-/// 16-byte header as the first report (Report ID, then 15 zero bytes).
-pub const CONTINUATION_CHUNK_PAYLOAD_MAX: usize = REPORT_SIZE - HEADER_SIZE;
-
-/// Raw wire value of `ReportId::Control`.
-const REPORT_ID_CONTROL_RAW: u8 = 1;
-
-/// Raw wire value of `ReportId::Video`.
-const REPORT_ID_VIDEO_RAW: u8 = 2;
-
-/// The two closed, protocol-defined Report ID values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportId {
-    /// MI_00 (control/heartbeat channel).
-    Control,
-    /// MI_01 (video channel).
-    Video,
-}
+pub use super::types::{
+    FrameHeader, FramingError, MessageBuilder, ParsedMessage, ReportId,
+    CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
+};
+use super::types::{REPORT_ID_CONTROL_RAW, REPORT_ID_VIDEO_RAW};
+pub use crate::utils::types::{PictureSize, PixelHeight, PixelWidth};
 
 impl ReportId {
     /// Serializes to the raw wire byte.
@@ -87,44 +64,6 @@ impl ReportId {
             other => Err(FramingError::UnknownReportId { raw: other }),
         }
     }
-}
-
-/// Picture width in pixels, as carried in header bytes 8..11.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PixelWidth(pub u32);
-
-/// Picture height in pixels, as carried in header bytes 12..15.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PixelHeight(pub u32);
-
-/// Picture size carried in the header of a video message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PictureSize {
-    pub width: PixelWidth,
-    pub height: PixelHeight,
-}
-
-impl PictureSize {
-    pub fn new(width: u32, height: u32) -> Self {
-        Self {
-            width: PixelWidth(width),
-            height: PixelHeight(height),
-        }
-    }
-
-    /// The size field values of a control message: both zero.
-    pub fn zero() -> Self {
-        Self::new(0, 0)
-    }
-}
-
-/// The 16-byte header fields present on the first report of every message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FrameHeader {
-    pub report_id: ReportId,
-    /// Total payload length of the whole message.
-    pub payload_len: u32,
-    pub size: PictureSize,
 }
 
 impl FrameHeader {
@@ -161,48 +100,6 @@ impl FrameHeader {
             size: PictureSize::new(width, height),
         })
     }
-}
-
-/// A message reconstructed from a chunk sequence: the header fields plus the reassembled
-/// payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParsedMessage {
-    pub report_id: ReportId,
-    pub size: PictureSize,
-    pub payload: Vec<u8>,
-}
-
-/// Errors from building or parsing a chunk sequence.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum FramingError {
-    /// `from_bytes` was given fewer than `HEADER_SIZE` bytes.
-    #[error("buffer too short to contain a {HEADER_SIZE}-byte header: got {len} bytes")]
-    HeaderTooShort { len: usize },
-    /// Header bytes 5..8 weren't zero.
-    #[error("header bytes 5..8 weren't zero: {bytes:?}")]
-    NonZeroPadding { bytes: [u8; 3] },
-    /// A header's Report ID byte wasn't one of the two protocol-defined values.
-    #[error("unknown Report ID byte {raw} (expected 1 for control or 2 for video)")]
-    UnknownReportId { raw: u8 },
-    /// `parse_chunks` was given an empty chunk list.
-    #[error("no chunks provided")]
-    NoChunks,
-    /// A chunk (by index in the sequence) was shorter than the payload its header/offset
-    /// implies it should carry.
-    #[error("chunk {index} shorter than its expected payload")]
-    TruncatedChunk { index: usize },
-    /// A continuation chunk was shorter than the 16-byte continuation header.
-    #[error("continuation chunk {index} is shorter than the {HEADER_SIZE}-byte header")]
-    ContinuationHeaderTooShort { index: usize },
-    /// A continuation chunk's Report ID byte didn't match the first chunk's.
-    #[error("chunk {index} Report ID {got} doesn't match first chunk's {expected}")]
-    ReportIdMismatch { index: usize, expected: u8, got: u8 },
-    /// A continuation chunk's header bytes 1..16 weren't all zero.
-    #[error("continuation chunk {index} header bytes 1..16 weren't zero")]
-    NonZeroContinuationHeader { index: usize },
-    /// The chunk sequence ended before the announced payload length was recovered.
-    #[error("chunk sequence ended {missing} payload bytes short of the payload length")]
-    IncompleteMessage { missing: usize },
 }
 
 /// Splits `payload` into the wire-ready chunk sequence for one message (either a video keyframe
@@ -289,15 +186,6 @@ pub fn parse_chunks(chunks: &[Vec<u8>]) -> Result<ParsedMessage, FramingError> {
         size: header.size,
         payload,
     })
-}
-
-/// Builds a complete wire-ready chunk sequence for one message, with distinct entry points for
-/// the video and control channels, so control messages always carry zero width and height by
-/// construction. A thin builder over the pure `frame_message` function.
-pub struct MessageBuilder {
-    report_id: ReportId,
-    size: PictureSize,
-    payload: Vec<u8>,
 }
 
 impl MessageBuilder {

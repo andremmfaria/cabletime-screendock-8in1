@@ -6,19 +6,13 @@
 //! picks one once at startup and hands back a boxed trait object, so the rest of the daemon
 //! never names a concrete backend.
 
+pub mod types;
 pub mod wayland_portal;
 pub mod x11_shm;
 
+pub use self::types::{BackendKind, SessionType};
 use crate::ports::capture::{CaptureBackend, CaptureError};
 use crate::utils::config::{CaptureBackendChoice, Config};
-
-/// Kind of graphical session the daemon runs in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionType {
-    X11,
-    Wayland,
-    Unknown,
-}
 
 /// Classifies the session from environment values read through `get`. `$XDG_SESSION_TYPE` wins
 /// when it names `x11` or `wayland`; otherwise `$WAYLAND_DISPLAY` is checked before `$DISPLAY`
@@ -45,13 +39,6 @@ pub fn detect_session_with(get: impl Fn(&str) -> Option<String>) -> SessionType 
 /// [`detect_session_with`] over the process environment.
 pub fn detect_session() -> SessionType {
     detect_session_with(|name| std::env::var(name).ok())
-}
-
-/// Concrete backend selected by [`select_backend`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackendKind {
-    X11Shm,
-    WaylandPortal,
 }
 
 /// Resolves the configured choice against the detected session. An explicit choice always wins;

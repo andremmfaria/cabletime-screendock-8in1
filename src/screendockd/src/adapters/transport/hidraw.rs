@@ -22,22 +22,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::discovery::{Mi00Path, Mi01Path};
+pub use super::types::HidrawHandle;
 use crate::ports::transport::{DockTransport, TransportError, WriteTimings};
 use crate::protocol::framing::{
     parse_chunks, FrameHeader, FramingError, ParsedMessage, ReportId,
     CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
 };
-
-/// An open hidraw node for one of the dock's two channels.
-///
-/// The channel (`ReportId::Control` for MI_00, `ReportId::Video` for MI_01) is fixed at open
-/// time and every written chunk is checked against it, so a video chunk can never be written to
-/// the control node (or vice versa) by accident.
-#[derive(Debug)]
-pub struct HidrawHandle {
-    file: File,
-    channel: ReportId,
-}
 
 impl HidrawHandle {
     /// Opens the resolved MI_00 node (control/heartbeat channel).

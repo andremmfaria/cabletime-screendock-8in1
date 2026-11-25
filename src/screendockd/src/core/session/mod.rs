@@ -28,41 +28,33 @@
 //! names reach the logs.
 
 mod controller;
-mod error;
-mod events;
 mod heartbeat;
 mod reader;
 mod settings;
 mod state;
 #[cfg(test)]
 mod tests;
+pub mod types;
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-pub use error::SessionError;
 pub use settings::SessionSettings;
 pub use state::{SessionHandle, SessionState, SessionStats};
+pub use types::SessionError;
 
 use controller::Controller;
 use heartbeat::heartbeat_thread;
 use reader::reader_thread;
 use state::Shared;
 
+pub use self::types::Session;
+use self::types::SharedWriter;
 use crate::ports::transport::{DockTransport, TransportError};
 use crate::protocol::framing::{MessageBuilder, ReportId, FIRST_CHUNK_PAYLOAD_MAX};
 use crate::protocol::heartbeat::heartbeat_message;
-
-/// A running session: owns the heartbeat, reader and controller threads.
-#[derive(Debug)]
-pub struct Session {
-    shared: Arc<Shared>,
-    threads: Vec<(&'static str, JoinHandle<()>)>,
-}
-
-type SharedWriter = Arc<Mutex<Box<dyn DockTransport>>>;
 
 fn send_control(writer: &SharedWriter, payload: &[u8]) -> Result<(), SessionError> {
     if payload.len() > FIRST_CHUNK_PAYLOAD_MAX {

@@ -16,42 +16,15 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixDatagram;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::types::{DockState, Inner, SinkEffect};
+pub use super::types::{FakeDock, FakeDockConfig, StartedReply, VideoStats};
 use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::protocol::framing::{frame_message, PictureSize, ReportId, REPORT_SIZE};
 use crate::protocol::inbound::InboundAssembler;
-
-/// What the fake answers to `notify-projection-started`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StartedReply {
-    /// `"result":"isAllowed"`.
-    Allowed,
-    /// `"result":"isDenied"`.
-    Denied,
-    /// No reply at all.
-    Silent,
-}
-
-/// Fake dock behavior.
-#[derive(Debug, Clone)]
-pub struct FakeDockConfig {
-    /// Announce ready (plus tx-data) every `ready_interval` while no session is held.
-    pub announce_ready: bool,
-    pub ready_interval: Duration,
-    /// Dock heartbeat period; `None` makes a silent dock.
-    pub heartbeat_interval: Option<Duration>,
-    /// Delay before the `app-launched` result; `None` never answers it.
-    pub launch_reply_delay: Option<Duration>,
-    pub started_reply: StartedReply,
-    /// Send the EDID passthrough (id 101) after `app-launched`, repeating until answered.
-    pub send_edid: bool,
-    /// Start with a projection session already held (no announcements, no replies needed).
-    pub holds_session: bool,
-}
 
 impl FakeDockConfig {
     /// A freshly plugged dock: announces ready, answers everything.
@@ -81,64 +54,10 @@ impl FakeDockConfig {
     }
 }
 
-/// What the fake saw on its simulated MI_01.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct VideoStats {
-    pub reports: u64,
-    pub messages: u64,
-    /// Reports that arrived while the sink was not started (a real dock drops these).
-    pub reports_before_sink: u64,
-    /// Reports that broke the header layout.
-    pub layout_violations: u64,
-    /// Width and height of the first video message.
-    pub first_size: Option<(u32, u32)>,
-    /// Number of complete host control messages (heartbeats included) logged when the first
-    /// video report arrived.
-    pub control_messages_before_video: Option<usize>,
-}
-
-#[derive(Debug)]
-struct DockState {
-    app_known: bool,
-    sink_started: bool,
-    edid_pending: bool,
-    next_edid: Instant,
-    next_ready: Instant,
-    next_heartbeat: Instant,
-    seq: u64,
-    scheduled: Vec<(Instant, Vec<u8>, SinkEffect)>,
-    host_log: Vec<(Instant, Vec<u8>)>,
-    format_violations: u64,
-    allowed_sent_at: Option<Instant>,
-    video: VideoStats,
-    launch_error: bool,
-}
-
-/// Side effect applied when a scheduled message is sent.
-#[derive(Debug, Clone, Copy)]
-enum SinkEffect {
-    None,
-    StartSink,
-}
-
-#[derive(Debug)]
-struct Inner {
-    config: FakeDockConfig,
-    state: Mutex<DockState>,
-    stop: AtomicBool,
-}
-
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, DockState> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
-}
-
-/// A running fake dock.
-#[derive(Debug)]
-pub struct FakeDock {
-    inner: Arc<Inner>,
-    thread: Option<JoinHandle<()>>,
 }
 
 fn pretty(method: &str, params: Option<&str>, seq: u64) -> Vec<u8> {

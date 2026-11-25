@@ -8,26 +8,10 @@
 //!
 //! Pure functions over bytes: no I/O, no framing.
 
-use thiserror::Error;
-
-const NAL_TYPE_MASK: u8 = 0x1F;
-const NAL_SLICE_NON_IDR: u8 = 1;
-const NAL_SLICE_IDR: u8 = 5;
-const NAL_SEI: u8 = 6;
-const NAL_SPS: u8 = 7;
-const NAL_PPS: u8 = 8;
-const NAL_AUD: u8 = 9;
-
-/// Errors from splitting an Annex-B stream.
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum AnnexBError {
-    /// No `00 00 01` / `00 00 00 01` start code was found.
-    #[error("no Annex-B start code found in the input")]
-    NoStartCode,
-    /// The stream contained no slice NAL (type 1 or 5), so there is nothing to display.
-    #[error("stream contains no slice NAL units")]
-    NoSlices,
-}
+pub use super::types::AnnexBError;
+use super::types::{
+    NAL_AUD, NAL_PPS, NAL_SEI, NAL_SLICE_IDR, NAL_SLICE_NON_IDR, NAL_SPS, NAL_TYPE_MASK,
+};
 
 /// Returns the byte offsets of every start code (offset of its first `00`), in order.
 fn start_code_offsets(data: &[u8]) -> Vec<usize> {

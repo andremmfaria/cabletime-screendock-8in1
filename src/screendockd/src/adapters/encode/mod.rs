@@ -20,20 +20,11 @@
 #[cfg(feature = "encode-ffmpeg")]
 pub mod ffmpeg;
 pub mod prerecorded;
+pub mod types;
 
-use std::path::PathBuf;
-
+pub use self::types::EncoderKind;
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
 use crate::protocol::annexb::{messages_from_annexb, AnnexBError};
-
-/// Which encoder `create_encoder` builds.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EncoderKind {
-    /// libx264 through ffmpeg (feature `encode-ffmpeg`).
-    Ffmpeg,
-    /// Replay of an Annex-B file.
-    Prerecorded(PathBuf),
-}
 
 /// Constructs the requested encoder once at startup.
 pub fn create_encoder(

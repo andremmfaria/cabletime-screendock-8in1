@@ -15,52 +15,16 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-
-use crate::core::session::{Session, SessionError, SessionHandle, SessionSettings, SessionStats};
-use crate::ports::transport::{DockTransport, TransportError};
+pub use super::types::{
+    IsolateMode, IsolateParams, IsolateReport, ReplayReport, TimingStats, ValidationError,
+    REFERENCE_MS_PER_CHUNK, SYNTHETIC_INTERFRAME_LEN, SYNTHETIC_KEYFRAME_LEN,
+};
+use super::types::{VideoOutcome, SLEEP_SLICE};
+use crate::core::session::{Session, SessionHandle};
+use crate::ports::transport::DockTransport;
 use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
 use crate::protocol::heartbeat::SessionId;
-use crate::tools::heartbeat_loop::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
-
-/// Per-chunk write latency the PowerShell/.NET prototype achieved, in milliseconds. The
-/// write-timing exit criterion is at or below this figure.
-pub const REFERENCE_MS_PER_CHUNK: f64 = 0.77;
-
-/// Size of the research's keyframe bundle fixture (SPS+PPS+SEI+IDR), in bytes.
-pub const SYNTHETIC_KEYFRAME_LEN: usize = 3577;
-
-/// Size of the research's 17-chunk inter-frame fixture, in bytes.
-pub const SYNTHETIC_INTERFRAME_LEN: usize = 67_666;
-
-/// Longest single sleep while waiting, so deadlines and stop requests stay responsive.
-const SLEEP_SLICE: Duration = Duration::from_millis(20);
-
-/// Errors from the validation routines.
-#[derive(Debug, Error)]
-pub enum ValidationError {
-    /// A hidraw write failed.
-    #[error("hidraw I/O failed: {0}")]
-    Io(#[from] TransportError),
-    /// The heartbeat loop failed.
-    #[error("heartbeat failed: {0}")]
-    Heartbeat(#[from] HeartbeatError),
-    /// The caller passed unusable parameters.
-    #[error("invalid validation input: {0}")]
-    InvalidInput(String),
-    /// The heartbeat thread panicked.
-    #[error("heartbeat thread panicked")]
-    HeartbeatPanicked,
-    /// The dock session failed to start or ended.
-    #[error("session failed: {0}")]
-    Session(#[from] SessionError),
-    /// The session did not become armed in time.
-    #[error("dock session not armed within {0:?}")]
-    NotArmed(Duration),
-    /// The session ended for good.
-    #[error("dock session ended: {0}")]
-    SessionEnded(String),
-}
+use crate::tools::heartbeat_loop::run_heartbeat_loop;
 
 /// Waits until `session` is armed for video, for at most `limit`.
 pub fn wait_until_armed(session: &SessionHandle, limit: Duration) -> Result<(), ValidationError> {
@@ -98,18 +62,6 @@ pub fn synthetic_keyframe_bundle() -> Vec<u8> {
 /// A single-NAL inter-frame-shaped message of exactly 67,666 bytes (17 chunks), filler body.
 pub fn synthetic_interframe() -> Vec<u8> {
     nal(1, 2, SYNTHETIC_INTERFRAME_LEN - 5)
-}
-
-/// Summary statistics over a set of durations.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TimingStats {
-    pub count: usize,
-    pub min: Duration,
-    pub max: Duration,
-    pub mean: Duration,
-    pub p50: Duration,
-    pub p95: Duration,
-    pub p99: Duration,
 }
 
 impl TimingStats {
@@ -151,20 +103,6 @@ impl fmt::Display for TimingStats {
             us(self.max),
         )
     }
-}
-
-/// Result of a replay run.
-#[derive(Debug, Clone)]
-pub struct ReplayReport {
-    pub messages_sent: usize,
-    pub chunks_sent: usize,
-    /// Stats over every individual `write(2)` call; `None` if nothing was sent.
-    pub chunk_stats: Option<TimingStats>,
-    /// Stats over per-message total write time (first write start to last write end).
-    pub message_stats: Option<TimingStats>,
-    /// Wall time per message divided by its chunk count, averaged, in milliseconds. This is
-    /// the figure comparable to `REFERENCE_MS_PER_CHUNK`, since it includes inter-write gaps.
-    pub mean_ms_per_chunk_wall: f64,
 }
 
 impl ReplayReport {
@@ -252,17 +190,6 @@ pub fn run_replay(
     })
 }
 
-/// The three isolation conditions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IsolateMode {
-    /// Heartbeat on MI_00 only, no video.
-    Heartbeat,
-    /// Video on MI_01 only, no heartbeat.
-    Video,
-    /// Both concurrently.
-    Both,
-}
-
 impl IsolateMode {
     fn heartbeat(self) -> bool {
         matches!(self, Self::Heartbeat | Self::Both)
@@ -270,37 +197,6 @@ impl IsolateMode {
     fn video(self) -> bool {
         matches!(self, Self::Video | Self::Both)
     }
-}
-
-/// Parameters for an isolation run.
-#[derive(Debug, Clone)]
-pub struct IsolateParams {
-    pub mode: IsolateMode,
-    pub duration: Duration,
-    pub heartbeat_interval: Duration,
-    pub size: PictureSize,
-    /// MI_00 session settings. `Some` runs the dock session (handshake, reader, heartbeat) on
-    /// the MI_00 handle and gates video on it; `None` sends a bare heartbeat loop and ungated
-    /// video, which a dock that has not been handshaken discards.
-    pub session: Option<SessionSettings>,
-    pub fps: u32,
-    /// One looped group of pictures: element 0 must be the keyframe bundle, the rest
-    /// inter-frames. The loop restarts at the keyframe each time it wraps.
-    pub gop: Vec<Vec<u8>>,
-}
-
-/// Result of an isolation run.
-#[derive(Debug, Clone)]
-pub struct IsolateReport {
-    pub mode: IsolateMode,
-    pub elapsed: Duration,
-    pub heartbeat: Option<HeartbeatStats>,
-    /// Session counters when the dock session ran.
-    pub session: Option<SessionStats>,
-    pub video_messages: usize,
-    pub video_chunk_stats: Option<TimingStats>,
-    /// Frames whose send finished after their scheduled slot (the stream fell behind `fps`).
-    pub video_late_frames: usize,
 }
 
 impl fmt::Display for IsolateReport {
@@ -347,12 +243,6 @@ fn sleep_until(deadline: Instant, stop: &AtomicBool) -> bool {
         std::thread::sleep(left.min(SLEEP_SLICE));
     }
     true
-}
-
-struct VideoOutcome {
-    messages: usize,
-    chunk_samples: Vec<Duration>,
-    late: usize,
 }
 
 fn run_video_paced(
@@ -523,6 +413,7 @@ pub fn run_isolate(
 mod tests {
     use super::*;
     use crate::adapters::transport::hidraw::HidrawHandle;
+    use crate::core::session::SessionSettings;
     use crate::protocol::framing::parse_chunks;
     use std::fs::{File, OpenOptions};
     use std::io::{Read, Seek, SeekFrom};

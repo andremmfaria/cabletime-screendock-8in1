@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use clap::Args;
 
 use crate::adapters::capture::create_backend;
 use crate::adapters::encode::create_encoder;
@@ -11,22 +10,10 @@ use crate::ports::encode::EncoderSettings;
 use crate::tools::bench::run_bench;
 use crate::utils::config::Config;
 
-use super::args::{BackendArg, EncoderArgs};
 #[allow(unused_imports)]
 use super::support::load_messages;
 use super::support::{geometry, shutdown_flag};
-
-#[derive(Debug, Args)]
-pub(super) struct BenchArgs {
-    #[command(flatten)]
-    pub(super) encoder: EncoderArgs,
-    /// Capture backend, overriding the configured `capture.backend`.
-    #[arg(long, value_enum)]
-    pub(super) backend: Option<BackendArg>,
-    /// Measurement duration in seconds.
-    #[arg(long, default_value_t = 30)]
-    pub(super) duration_secs: u64,
-}
+use super::types::BenchArgs;
 
 pub(super) fn run(args: BenchArgs, config: &Config) -> Result<()> {
     if args.duration_secs == 0 {

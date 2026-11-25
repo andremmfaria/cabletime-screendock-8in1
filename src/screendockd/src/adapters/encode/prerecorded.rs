@@ -7,16 +7,10 @@
 
 use std::path::Path;
 
+pub use super::types::PrerecordedEncoder;
 use crate::ports::capture::Frame;
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
 use crate::protocol::annexb::messages_from_annexb;
-
-/// Replays a fixed message sequence in a loop.
-#[derive(Debug)]
-pub struct PrerecordedEncoder {
-    messages: Vec<VideoMessage>,
-    next: usize,
-}
 
 impl PrerecordedEncoder {
     /// Builds the encoder from already split messages. The first one must be a keyframe bundle.

@@ -6,53 +6,9 @@
 //! rotation: a landscape picture is wider than tall, a portrait picture is taller than wide.
 //! The video header carries the encoded picture's width and height unchanged.
 
-use thiserror::Error;
-
+pub use super::types::{DisplayError, DisplayGeometry, Orientation, MAX_DIMENSION, MIN_DIMENSION};
 use crate::protocol::framing::{PictureSize, PixelHeight, PixelWidth};
 use crate::utils::config::DisplayConfig;
-
-/// Smallest accepted edge length in pixels (one H.264 macroblock).
-pub const MIN_DIMENSION: u32 = 16;
-
-/// Largest accepted edge length in pixels, within what Constrained Baseline encoders handle in
-/// practice.
-pub const MAX_DIMENSION: u32 = 4096;
-
-/// Orientation of the encoded picture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Orientation {
-    Landscape,
-    Portrait,
-}
-
-/// Errors from validating the display settings.
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum DisplayError {
-    /// The orientation string is neither `landscape` nor `portrait`.
-    #[error("display.orientation must be \"landscape\" or \"portrait\", got {0:?}")]
-    UnknownOrientation(String),
-    /// A dimension is outside `MIN_DIMENSION..=MAX_DIMENSION`.
-    #[error("display {axis} {value} is outside {MIN_DIMENSION}..={MAX_DIMENSION}")]
-    OutOfRange { axis: &'static str, value: u32 },
-    /// A dimension is odd; yuv420p chroma subsampling needs even sizes.
-    #[error("display {axis} {value} must be even")]
-    Odd { axis: &'static str, value: u32 },
-    /// The width and height disagree with the stated orientation.
-    #[error("{width}x{height} is not a {orientation:?} size")]
-    OrientationMismatch {
-        width: u32,
-        height: u32,
-        orientation: Orientation,
-    },
-}
-
-/// Validated encoded-picture geometry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DisplayGeometry {
-    width: PixelWidth,
-    height: PixelHeight,
-    orientation: Orientation,
-}
 
 impl Orientation {
     /// Parses the config string, case-insensitively.

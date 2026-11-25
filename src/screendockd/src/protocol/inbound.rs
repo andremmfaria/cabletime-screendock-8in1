@@ -5,33 +5,8 @@
 use serde_json::Value;
 
 use super::framing::{FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE};
-
-/// Largest dock message the reader reassembles; anything bigger is dropped as malformed.
-const MAX_INBOUND_LEN: usize = 64 * 1024;
-
-/// Longest dock-supplied string (method names) written to the log.
-pub const LOG_TEXT_MAX: usize = 64;
-
-/// A parsed message from the dock.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DockMessage {
-    /// `notify-app-accessories-are-ready`.
-    Ready,
-    /// The dock's heartbeat.
-    Heartbeat,
-    /// `common.data_passthrough` with the given params id.
-    Passthrough { id: Option<u64> },
-    /// A result or error for one of our requests.
-    Reply {
-        id: u64,
-        result: Option<Value>,
-        error: Option<Value>,
-    },
-    /// Any other notification (`tx-data-updated`, ...), with its truncated method name.
-    Other { method: String },
-    /// Text that isn't a JSON-RPC object this driver understands.
-    Unrecognized,
-}
+use super::types::MAX_INBOUND_LEN;
+pub use super::types::{DockMessage, InboundAssembler, LOG_TEXT_MAX};
 
 /// Parses the JSON text of one dock message.
 pub fn parse_dock_message(text: &[u8]) -> DockMessage {
@@ -64,18 +39,6 @@ pub fn parse_dock_message(text: &[u8]) -> DockMessage {
         }
     }
     DockMessage::Unrecognized
-}
-
-/// Reassembles the dock's MI_00 reports into message texts.
-///
-/// Reports use the same layout the host writes: a 16-byte header with the big-endian payload
-/// length at bytes 1..4 on the first report, then payload from offset 16; continuation reports
-/// repeat the header with a zero length. The reader is lenient about the other header bytes,
-/// since the input is the dock's, but never trusts the length beyond [`MAX_INBOUND_LEN`].
-#[derive(Debug, Default)]
-pub struct InboundAssembler {
-    expected: usize,
-    buf: Vec<u8>,
 }
 
 impl InboundAssembler {

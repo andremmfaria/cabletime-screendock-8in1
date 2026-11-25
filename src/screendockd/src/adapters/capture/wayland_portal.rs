@@ -13,9 +13,6 @@
 use crate::ports::capture::{CaptureBackend, CaptureError, Frame};
 
 #[cfg(not(feature = "capture-wayland"))]
-pub struct WaylandPortalCapture;
-
-#[cfg(not(feature = "capture-wayland"))]
 impl WaylandPortalCapture {
     /// Always fails: this build lacks the `capture-wayland` feature.
     pub fn connect(_width: u32, _height: u32, _fps: u32) -> Result<Self, CaptureError> {
@@ -40,13 +37,12 @@ impl CaptureBackend for WaylandPortalCapture {
     }
 }
 
-#[cfg(feature = "capture-wayland")]
-pub use enabled::WaylandPortalCapture;
+pub use super::types::WaylandPortalCapture;
 
 #[cfg(feature = "capture-wayland")]
 mod enabled {
     use std::os::fd::OwnedFd;
-    use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+    use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
     use std::time::{Duration, Instant};
 
     use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
@@ -56,27 +52,10 @@ mod enabled {
     use pw::spa;
 
     use super::{CaptureBackend, CaptureError, Frame};
+    use crate::adapters::capture::types::{
+        FrameMessage, StreamState, WaylandPortalCapture, MAX_DIMENSION, QUEUE_DEPTH,
+    };
     use crate::ports::capture::PixelFormat;
-
-    /// Frames buffered between the PipeWire thread and the consumer.
-    const QUEUE_DEPTH: usize = 2;
-    /// Upper bound advertised for the negotiated stream size.
-    const MAX_DIMENSION: u32 = 8192;
-
-    type FrameMessage = Result<Frame, CaptureError>;
-
-    /// Receives frames from a portal ScreenCast session through PipeWire.
-    pub struct WaylandPortalCapture {
-        frames: Receiver<FrameMessage>,
-    }
-
-    struct StreamState {
-        format: spa::param::video::VideoInfoRaw,
-        tx: SyncSender<FrameMessage>,
-        mainloop: pw::main_loop::MainLoopRc,
-        interval: Duration,
-        last_sent: Option<Instant>,
-    }
 
     fn portal_err(e: impl std::fmt::Display) -> CaptureError {
         CaptureError::Portal(e.to_string())

@@ -24,12 +24,8 @@
 
 use tracing_subscriber::EnvFilter;
 
+use super::types::LOG_LEVEL_ENV_VAR;
 use crate::utils::config::Config;
-
-/// Environment variable `tracing-subscriber`'s `EnvFilter` reads for a level override — the
-/// same `RUST_LOG` convention `log`/`env_logger` users already expect, so this isn't a new
-/// environment variable to document.
-const LOG_LEVEL_ENV_VAR: &str = "RUST_LOG";
 
 /// Initializes the process-global `tracing` subscriber.
 ///

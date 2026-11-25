@@ -26,50 +26,14 @@ mod isolate;
 mod replay;
 mod run;
 mod support;
-
-use std::path::PathBuf;
+pub mod types;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 use crate::utils::logging::init_logging;
 
-use self::capture::CaptureArgs;
-use self::run::RunArgs;
-#[cfg(feature = "tools")]
-use self::{bench::BenchArgs, isolate::IsolateArgs, replay::ReplayArgs};
-
-/// Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W).
-#[derive(Debug, Parser)]
-#[command(name = "screendockd", version, arg_required_else_help = true)]
-struct Cli {
-    /// Config file path. Defaults to the resolution order in docs/configuration.md.
-    #[arg(long, global = true, value_name = "PATH")]
-    config: Option<PathBuf>,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Resolve and print the dock's MI_00 and MI_01 hidraw nodes.
-    Discover,
-    /// Replay a keyframe plus a 17-chunk message back-to-back on MI_01 and print
-    /// per-chunk write timing.
-    #[cfg(feature = "tools")]
-    Replay(ReplayArgs),
-    /// Run heartbeat-only, video-only or both for a fixed duration.
-    #[cfg(feature = "tools")]
-    Isolate(IsolateArgs),
-    /// Capture frames from the desktop and write them as PNG files.
-    Capture(CaptureArgs),
-    /// Run the daemon: heartbeat on MI_00, capture, encode and write video to MI_01.
-    Run(RunArgs),
-    /// Measure CPU time of capture plus encode over a fixed duration (no dock needed).
-    #[cfg(feature = "tools")]
-    Bench(BenchArgs),
-}
+use self::types::{Cli, Command};
 
 /// Parses the command line, initializes logging and runs the chosen subcommand.
 pub fn run() -> Result<()> {

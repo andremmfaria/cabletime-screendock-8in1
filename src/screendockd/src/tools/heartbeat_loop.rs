@@ -11,32 +11,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-
-use crate::ports::transport::{DockTransport, TransportError};
+use super::types::STOP_POLL_SLICE;
+pub use super::types::{HeartbeatError, HeartbeatStats};
+use crate::ports::transport::DockTransport;
 use crate::protocol::framing::ReportId;
 use crate::protocol::heartbeat::{heartbeat_message, SessionId};
-
-/// Longest single sleep inside the loop, so a stop request is noticed promptly.
-const STOP_POLL_SLICE: Duration = Duration::from_millis(50);
-
-/// Errors from the heartbeat loop.
-#[derive(Debug, Error)]
-pub enum HeartbeatError {
-    /// The handle passed in isn't the MI_00 control channel.
-    #[error("heartbeat needs the control (MI_00) channel, got {got:?}")]
-    WrongChannel { got: ReportId },
-    /// Writing a heartbeat message failed.
-    #[error("heartbeat tick {tick} write failed: {source}")]
-    Write { tick: u64, source: TransportError },
-}
-
-/// Summary of a finished heartbeat loop.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeartbeatStats {
-    /// Number of heartbeat messages written.
-    pub ticks_sent: u64,
-}
 
 /// Sends a heartbeat with a constant `session_id` on `handle` every `interval`, starting
 /// immediately.

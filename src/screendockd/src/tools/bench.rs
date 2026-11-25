@@ -9,28 +9,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-
-use crate::ports::capture::{CaptureBackend, CaptureError};
-use crate::ports::encode::{EncodeError, Encoder};
-
-/// Errors that abort a measurement.
-#[derive(Debug, Error)]
-pub enum BenchError {
-    #[error("capture failed: {0}")]
-    Capture(#[from] CaptureError),
-    #[error("encode failed: {0}")]
-    Encode(#[from] EncodeError),
-    #[error("getrusage failed: {0}")]
-    Rusage(std::io::Error),
-}
-
-/// Process CPU time.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct CpuTimes {
-    pub user: Duration,
-    pub system: Duration,
-}
+pub use super::types::{BenchError, BenchReport, CpuTimes, SizeStats};
+use crate::ports::capture::CaptureBackend;
+use crate::ports::encode::Encoder;
 
 impl CpuTimes {
     pub fn total(&self) -> Duration {
@@ -64,36 +45,6 @@ pub fn process_cpu_times() -> Result<CpuTimes, BenchError> {
         user: timeval(usage.ru_utime),
         system: timeval(usage.ru_stime),
     })
-}
-
-/// Result of one measurement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BenchReport {
-    pub frames: u64,
-    pub messages: u64,
-    pub encoded_bytes: u64,
-    pub wall: Duration,
-    pub cpu: CpuTimes,
-    /// Wall time spent inside `next_frame` (includes pacing waits).
-    pub capture_wall: Duration,
-    /// Wall time spent inside `encode`.
-    pub encode_wall: Duration,
-    /// Bytes of each frame's messages, in order.
-    pub frame_bytes: Vec<u64>,
-    /// Bytes of each keyframe message, in order.
-    pub keyframe_bytes: Vec<u64>,
-    /// Bytes of each non-keyframe message, in order.
-    pub inter_bytes: Vec<u64>,
-}
-
-/// Summary of a list of sizes in bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SizeStats {
-    pub count: usize,
-    pub min: u64,
-    pub median: u64,
-    pub p95: u64,
-    pub max: u64,
 }
 
 impl SizeStats {
@@ -243,7 +194,7 @@ pub fn run_bench(
 mod tests {
     use super::*;
     use crate::adapters::encode::prerecorded::PrerecordedEncoder;
-    use crate::ports::capture::{Frame, PixelFormat};
+    use crate::ports::capture::{CaptureError, Frame, PixelFormat};
     use crate::ports::encode::EncoderSettings;
     use crate::protocol::display::{DisplayGeometry, Orientation};
 

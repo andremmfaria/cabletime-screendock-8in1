@@ -3,55 +3,18 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use clap::{Args, ValueEnum};
 
 use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::ports::transport::DockTransport;
 use crate::tools::validation::{run_isolate, IsolateMode, IsolateParams};
 use crate::utils::config::Config;
 
-use super::args::{HandshakeArgs, NodeArgs, StreamArgs};
 #[allow(unused_imports)]
 use super::support::load_messages;
 use super::support::{
     device_ids, resolve_nodes, session_settings, size_for, warn_if_not_char_device,
 };
-
-#[derive(Debug, Args)]
-pub(super) struct IsolateArgs {
-    #[command(flatten)]
-    pub(super) nodes: NodeArgs,
-    #[command(flatten)]
-    pub(super) stream: StreamArgs,
-    /// Which condition to run.
-    #[arg(long, value_enum)]
-    pub(super) mode: ModeArg,
-    /// How long to run, in seconds.
-    #[arg(long, default_value_t = 30)]
-    pub(super) duration_secs: u64,
-    /// Video frame rate.
-    #[arg(long, default_value_t = 25)]
-    pub(super) fps: u32,
-    #[command(flatten)]
-    pub(super) handshake: HandshakeArgs,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(super) enum ModeArg {
-    Heartbeat,
-    Video,
-    Both,
-}
-
-impl From<ModeArg> for IsolateMode {
-    fn from(mode: ModeArg) -> Self {
-        match mode {
-            ModeArg::Heartbeat => IsolateMode::Heartbeat,
-            ModeArg::Video => IsolateMode::Video,
-            ModeArg::Both => IsolateMode::Both,
-        }
-    }
-}
+use super::types::IsolateArgs;
 
 pub(super) fn run(args: IsolateArgs, config: &Config) -> Result<()> {
     let mode = IsolateMode::from(args.mode);

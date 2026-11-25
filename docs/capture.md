@@ -1,6 +1,6 @@
 # Capture
 
-The capture layer turns the desktop into a stream of `Frame` values for the encoder. The `CaptureBackend` trait and the `Frame` type are in `src/screendockd/src/ports/capture.rs`; backend selection and the implementations are in `src/screendockd/src/adapters/capture/`.
+The capture layer turns the desktop into a stream of `Frame` values for the encoder. The `CaptureBackend` trait and the `Frame` type are declared in `src/screendockd/src/ports/types.rs` and re-exported from `src/screendockd/src/ports/capture.rs`; backend selection and the implementations are in `src/screendockd/src/adapters/capture/`.
 
 ## Types
 

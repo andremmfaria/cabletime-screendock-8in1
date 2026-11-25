@@ -7,3 +7,4 @@ pub mod framing;
 pub mod heartbeat;
 pub mod inbound;
 pub mod messages;
+pub mod types;

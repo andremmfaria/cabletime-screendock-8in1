@@ -5,21 +5,7 @@
 use std::fmt;
 use std::path::Path;
 
-use thiserror::Error;
-
-/// Layout of the bytes in one pixel of a [`Frame`]. All supported layouts use four bytes per
-/// pixel; the name lists the byte order in memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PixelFormat {
-    /// Bytes B, G, R, unused (X11 little-endian 24-bit depth in 32-bit pixels).
-    Bgrx8888,
-    /// Bytes B, G, R, A.
-    Bgra8888,
-    /// Bytes R, G, B, unused.
-    Rgbx8888,
-    /// Bytes R, G, B, A.
-    Rgba8888,
-}
+pub use super::types::{CaptureBackend, CaptureError, Frame, PixelFormat};
 
 impl PixelFormat {
     /// Bytes occupied by one pixel.
@@ -34,17 +20,6 @@ impl PixelFormat {
             PixelFormat::Rgbx8888 | PixelFormat::Rgba8888 => (0, 1, 2),
         }
     }
-}
-
-/// One captured image. Rows are `stride` bytes apart and may carry padding after the last pixel.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Frame {
-    pub width: u32,
-    pub height: u32,
-    pub format: PixelFormat,
-    /// Bytes from the start of one row to the start of the next.
-    pub stride: usize,
-    pub data: Vec<u8>,
 }
 
 impl fmt::Debug for Frame {
@@ -138,52 +113,6 @@ impl Frame {
             .finish()
             .map_err(|e| CaptureError::Png(e.to_string()))
     }
-}
-
-/// Failures from selecting or running a capture backend.
-#[derive(Debug, Error)]
-pub enum CaptureError {
-    /// Neither `$XDG_SESSION_TYPE`, `$WAYLAND_DISPLAY` nor `$DISPLAY` identify a session.
-    #[error(
-        "no graphical session detected ($XDG_SESSION_TYPE, $WAYLAND_DISPLAY and $DISPLAY are unset)"
-    )]
-    NoSession,
-    /// The selected backend exists but cannot run in this build or session.
-    #[error("capture backend {backend} unavailable: {reason}")]
-    BackendUnavailable {
-        backend: &'static str,
-        reason: String,
-    },
-    /// Connecting to the display server or portal failed.
-    #[error("capture connection failed: {0}")]
-    Connection(String),
-    /// Shared memory setup or the XShm request failed.
-    #[error("shared memory capture failed: {0}")]
-    Shm(String),
-    /// The desktop portal refused or aborted the ScreenCast session.
-    #[error("screencast portal error: {0}")]
-    Portal(String),
-    /// The PipeWire stream failed or ended.
-    #[error("pipewire stream error: {0}")]
-    Stream(String),
-    /// The backend produced a buffer that does not match its stated geometry or format.
-    #[error("invalid frame: {0}")]
-    InvalidFrame(String),
-    /// PNG encoding failed.
-    #[error("png encoding failed: {0}")]
-    Png(String),
-    #[error("i/o error: {0}")]
-    Io(#[from] std::io::Error),
-}
-
-/// Common interface the encode loop consumes, independent of which backend is active. Object
-/// safe, and `Send` so a boxed backend can move into the capture thread.
-pub trait CaptureBackend: Send {
-    /// Short backend identifier for logs (`"x11-shm"`, `"wayland-portal"`).
-    fn name(&self) -> &'static str;
-
-    /// Blocks until the next frame is due and returns it.
-    fn next_frame(&mut self) -> Result<Frame, CaptureError>;
 }
 
 #[cfg(test)]

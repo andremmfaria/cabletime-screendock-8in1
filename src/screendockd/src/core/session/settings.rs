@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+pub use super::types::SessionSettings;
 use crate::core::policy::{
     DEFAULT_MAX_HEARTBEAT_FAILURES, DEFAULT_READY_TIMEOUT, DEFAULT_REPLY_TIMEOUT,
     DEFAULT_RETRY_DELAY, DEFAULT_SETTLE_DELAY,
@@ -19,23 +20,6 @@ pub fn hostname() -> String {
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(&buf[..end]).into_owned()
-}
-
-/// Session settings. `handshake: false` keeps only the heartbeat thread and arms video
-/// immediately, for regular files standing in for the nodes.
-#[derive(Debug, Clone)]
-pub struct SessionSettings {
-    pub session_id: SessionId,
-    pub machine_name: String,
-    pub size: PictureSize,
-    pub heartbeat_interval: Duration,
-    pub handshake: bool,
-    pub send_stopped: bool,
-    pub ready_timeout: Duration,
-    pub reply_timeout: Duration,
-    pub settle_delay: Duration,
-    pub retry_delay: Duration,
-    pub max_heartbeat_failures: u32,
 }
 
 impl SessionSettings {

@@ -4,25 +4,10 @@
 //! newline that is counted in the length field.
 
 use super::framing::PictureSize;
-
-/// Platform string the dock requires in `app-launched`.
-pub const PLATFORM: &str = "windows";
-/// Product type string the vendor driver sends.
-pub const PRODUCT_TYPE: &str = "QuattroTx CT10";
-/// Longest machine name sent, in characters.
-pub const MACHINE_NAME_MAX: usize = 15;
-/// Id of the EDID passthrough message the dock sends.
-pub const EDID_PASSTHROUGH_ID: u64 = 101;
-
-/// `notify-projection-stopped`.
-pub const PROJECTION_STOPPED: &[u8] =
-    b"{\"jsonrpc\":\"2.0\",\"method\":\"notify-projection-stopped\"}\n";
-
-/// `app_tx_mouse_icon_change` with an empty cursor.
-pub const MOUSE_ICON_CHANGE: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"app_tx_mouse_icon_change\",\"params\":{\"cursor_base64_data\":\"\"}}\n";
-
-/// The reply to the dock's EDID passthrough (id 101): passthrough id 103 with data `AQ==`.
-pub const EDID_ACK: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"common.data_passthrough\",\"params\":{\"data\":\"AQ==\",\"id\":103,\"size\":1}}\n";
+pub use super::types::{
+    EDID_ACK, EDID_PASSTHROUGH_ID, MACHINE_NAME_MAX, MOUSE_ICON_CHANGE, PLATFORM, PRODUCT_TYPE,
+    PROJECTION_STOPPED,
+};
 
 /// Uppercases a hostname and truncates it to 15 characters, as the vendor driver does for
 /// `platform-machine-name`.

@@ -1,27 +1,10 @@
 //! The `capture` subcommand.
 
-use std::path::PathBuf;
-
 use anyhow::{bail, Context, Result};
-use clap::Args;
 
+use super::types::CaptureArgs;
 use crate::adapters::capture::{create_backend, detect_session};
 use crate::utils::config::Config;
-
-use super::args::BackendArg;
-
-#[derive(Debug, Args)]
-pub(super) struct CaptureArgs {
-    /// Number of frames to capture.
-    #[arg(long, default_value_t = 5)]
-    pub(super) frames: u32,
-    /// Directory the `frame-NNNN.png` files are written to (created if missing).
-    #[arg(long, value_name = "DIR", default_value = ".")]
-    pub(super) out_dir: PathBuf,
-    /// Backend, overriding the configured `capture.backend`.
-    #[arg(long, value_enum)]
-    pub(super) backend: Option<BackendArg>,
-}
 
 pub(super) fn run(args: CaptureArgs, config: &Config) -> Result<()> {
     if args.frames == 0 {

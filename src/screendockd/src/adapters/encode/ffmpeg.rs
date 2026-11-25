@@ -13,27 +13,11 @@ use ffmpeg::format::Pixel;
 use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::{codec, encoder, frame, picture, Dictionary, Packet};
 
+pub use super::types::FfmpegEncoder;
+use super::types::SourceScaler;
 use crate::adapters::encode::messages_from_packet;
 use crate::ports::capture::{Frame, PixelFormat};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
-
-/// Scaler plus the source geometry it was built for.
-struct SourceScaler {
-    scaler: Scaler,
-    src: frame::Video,
-    width: u32,
-    height: u32,
-    pixel: Pixel,
-}
-
-/// libx264 encoder producing dock video messages.
-pub struct FfmpegEncoder {
-    settings: EncoderSettings,
-    encoder: encoder::Video,
-    source: Option<SourceScaler>,
-    pts: i64,
-    force_keyframe: bool,
-}
 
 fn setup_err(e: ffmpeg::Error) -> EncodeError {
     EncodeError::Setup(e.to_string())

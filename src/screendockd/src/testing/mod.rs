@@ -2,3 +2,4 @@
 //! shipped build.
 
 pub mod fake_dock;
+pub mod types;

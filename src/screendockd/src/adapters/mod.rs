@@ -3,3 +3,4 @@
 pub mod capture;
 pub mod encode;
 pub mod transport;
+pub mod types;

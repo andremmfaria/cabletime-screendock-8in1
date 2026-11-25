@@ -1,39 +1,17 @@
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::Arc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tracing::{info, warn};
 
-use super::events::DockEvent;
 use super::state::sleep_until;
-use super::{send_control, SessionError, SessionSettings, SessionState, Shared, SharedWriter};
+use super::types::DockEvent;
+pub(super) use super::types::{Controller, HandshakeEnd, Interrupted, Wait};
+use super::{send_control, SessionError, SessionState};
 use crate::core::policy::POLL_SLICE;
 use crate::protocol::inbound::LOG_TEXT_MAX;
 use crate::protocol::messages;
-
-/// How a wait ended early.
-pub(super) enum Interrupted {
-    Stopped,
-}
-
-/// Outcome of the handshake's bounded waits.
-pub(super) enum Wait<T> {
-    Got(T),
-    TimedOut,
-}
-
-pub(super) struct Controller {
-    pub(super) settings: SessionSettings,
-    pub(super) shared: Arc<Shared>,
-    pub(super) writer: SharedWriter,
-    pub(super) events: Receiver<DockEvent>,
-    pub(super) next_id: u64,
-    /// A ready announcement the monitor consumed; the next handshake starts from it instead
-    /// of waiting for another one.
-    pub(super) ready_pending: bool,
-}
 
 impl Controller {
     pub(super) fn run(&mut self) {
@@ -256,17 +234,6 @@ impl Controller {
                 Err(RecvTimeoutError::Disconnected) => return None,
             }
         }
-    }
-}
-
-pub(super) enum HandshakeEnd {
-    Stopped,
-    Failed(SessionError),
-}
-
-impl From<Interrupted> for HandshakeEnd {
-    fn from(_: Interrupted) -> Self {
-        HandshakeEnd::Stopped
     }
 }
 

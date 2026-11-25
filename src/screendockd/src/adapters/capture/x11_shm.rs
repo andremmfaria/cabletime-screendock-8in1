@@ -8,29 +8,15 @@
 use std::fs::File;
 use std::time::{Duration, Instant};
 
-use memmap2::{MmapMut, MmapOptions};
+use memmap2::MmapOptions;
 use rustix::fs::{ftruncate, memfd_create, MemfdFlags};
 use x11rb::connection::Connection;
-use x11rb::protocol::shm::{self, ConnectionExt as _};
-use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, ImageOrder, Window};
-use x11rb::rust_connection::RustConnection;
+use x11rb::protocol::shm::ConnectionExt as _;
+use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat, ImageOrder};
 
+pub use super::types::X11ShmCapture;
+use super::types::BYTES_PER_PIXEL;
 use crate::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
-
-/// Bytes per pixel the backend accepts (24-bit depth stored in 32-bit pixels).
-const BYTES_PER_PIXEL: usize = 4;
-
-/// Captures the root window of an X display through shared memory.
-pub struct X11ShmCapture {
-    conn: RustConnection,
-    root: Window,
-    seg: shm::Seg,
-    map: MmapMut,
-    width: u16,
-    height: u16,
-    interval: Duration,
-    next_due: Option<Instant>,
-}
 
 fn conn_err(e: impl std::fmt::Display) -> CaptureError {
     CaptureError::Connection(e.to_string())

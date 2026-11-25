@@ -1,6 +1,6 @@
 # Encoding
 
-The encode layer turns captured frames into the H.264 messages the dock's video channel carries. The `Encoder` trait and its data types are in `src/screendockd/src/ports/encode.rs`; the implementations and the message policy are in `src/screendockd/src/adapters/encode/`.
+The encode layer turns captured frames into the H.264 messages the dock's video channel carries. The `Encoder` trait and its data types are declared in `src/screendockd/src/ports/types.rs` and re-exported from `src/screendockd/src/ports/encode.rs`; the implementations and the message policy are in `src/screendockd/src/adapters/encode/`.
 
 ## Message policy
 

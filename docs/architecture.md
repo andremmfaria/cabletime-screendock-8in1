@@ -36,6 +36,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `cli` | Argument definitions (`args`), shared helpers (`support`) and one handler per subcommand (`discover`, `capture`, `run`, and with feature `tools` `replay`, `isolate`, `bench`). It is the composition root: it builds the adapters and passes them to the app, the core and the tools | Implemented |
 | `utils::config` | Loads the TOML config through a four step path resolution | Implemented |
 | `utils::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
+| `utils::types` | The configuration structs and enums and `ConfigError`, plus the plain value types shared by several layers: `PixelWidth`, `PixelHeight` and `PictureSize` | Implemented |
 | `ports::encode` | `Encoder` trait, `VideoMessage`, `EncoderSettings` and `EncodeError`. See [encoding.md](encoding.md) | Implemented |
 | `adapters::encode` | Message policy (`messages_from_packet`), `create_encoder`, libx264 encoder (`adapters::encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`adapters::encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
@@ -44,6 +45,26 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `tools::bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `ports::capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait and `CaptureError`. See [capture.md](capture.md) | Implemented, unit tested |
 | `adapters::capture` | `create_backend` and session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
+
+## Types per directory
+
+Every source directory has a `types.rs` that holds the declarations of that directory: structs, enums, traits (the port interfaces), type aliases, constants, `thiserror` error enums and their trivial `Default`, `From`, `Deref` and `AsRef` implementations. Behaviour stays in the logic files of the directory: inherent `impl` blocks with logic, functions, state machines and threads. A logic file re-exports the public types it used to declare, so `protocol::framing::ReportId`, `ports::capture::Frame` and every other public path are unchanged. Fields that only the logic files of the same directory touch are `pub(super)` in `types.rs`. Types are placed in the lowest layer that can hold them: `utils/types.rs` holds the newtypes and the picture size that `protocol`, `core`, `adapters`, `tools` and `cli` all use, and `protocol::framing` re-exports them.
+
+| Directory | `types.rs` holds |
+|---|---|
+| `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
+| `protocol` | `ReportId`, `FrameHeader`, `ParsedMessage`, `MessageBuilder`, `FramingError`, the report size constants, `AnnexBError`, the NAL type constants, `Orientation`, `DisplayGeometry`, `DisplayError`, `SessionId`, `SessionIdError`, `DockMessage`, `InboundAssembler`, the host message constants |
+| `ports` | `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
+| `core` | the session timing defaults and polling constants |
+| `core::session` | `Session`, `SessionState`, `SessionHandle`, `SessionStats`, `SessionSettings`, `SessionError`, the shared state, the controller and reader event types |
+| `adapters` | nothing of its own; the subdirectories hold the adapter types |
+| `adapters::capture` | `SessionType`, `BackendKind`, `X11ShmCapture`, `WaylandPortalCapture` and the Wayland stream state |
+| `adapters::encode` | `EncoderKind`, `FfmpegEncoder`, `PrerecordedEncoder` |
+| `adapters::transport` | `HidrawHandle`, `Mi00Path`, `Mi01Path`, `DeviceIds`, `DockHidrawPaths`, `DiscoveryError`, the discovery constants |
+| `app` | `DaemonParams`, `DaemonReport`, `DaemonError`, the daemon constants |
+| `cli` | the clap argument structs and enums and the parsed command |
+| `tools` | the replay, isolate, heartbeat and bench parameter, report and statistics types and their errors |
+| `testing` | `FakeDock`, `FakeDockConfig`, `StartedReply`, `VideoStats` and the fake dock state |
 
 ## Cargo features
 
@@ -56,12 +77,12 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 
 ## Layering rules
 
-Layers, lowest first: `utils`, `protocol`, `ports`, `core`, `adapters`, `app`, `cli`. `utils` is the cross-cutting base layer: configuration loading and logging setup only, no domain logic, and it imports nothing else from the crate. `tools` and `testing` are satellites.
+Layers, lowest first: `utils`, `protocol`, `ports`, `core`, `adapters`, `app`, `cli`. `utils` is the cross-cutting base layer: configuration loading, logging setup and the plain value types shared by several layers (`utils::types`), no domain logic, and it imports nothing else from the crate. `tools` and `testing` are satellites.
 
 | Layer | May import | Must not import |
 |---|---|---|
 | `utils` | std and external crates | any crate module |
-| `protocol` | `utils::config` (only `protocol::display`) | ports, core, adapters, app, cli, tools, testing |
+| `protocol` | `utils::config` (only `protocol::display`), `utils::types` | ports, core, adapters, app, cli, tools, testing |
 | `ports` | protocol, utils | core, adapters, app, cli, tools, testing |
 | `core` | protocol, ports, utils | adapters, app, cli, tools, testing (outside unit tests) |
 | `adapters` | ports, protocol, utils | core, app, cli |
@@ -70,7 +91,7 @@ Layers, lowest first: `utils`, `protocol`, `ports`, `core`, `adapters`, `app`, `
 | `testing` | adapters, ports, protocol | core, app, cli |
 | `cli` | everything | nothing |
 
-`mod.rs` files declare submodules and use no glob re-exports; only `core::session` re-exports its public items from its submodules.
+`mod.rs` files declare submodules and use no glob re-exports. Every directory declares `pub mod types;`, and the modules re-export their public types from `types` at the paths they have always had.
 
 - Ports are the traits and data types the daemon depends on (`ports::capture::CaptureBackend`, `ports::encode::Encoder`, `ports::transport::DockTransport`). The implementations live in `adapters` and are chosen once at startup by `adapters::capture::create_backend` and `adapters::encode::create_encoder`, so the daemon never names a concrete backend or encoder.
 - Mechanism and policy are separate. `adapters::transport::hidraw` moves framed buffers and checks only that each chunk's Report ID matches the channel the handle was opened for. `protocol::framing`, `protocol::heartbeat` and `protocol::messages` define what messages mean and never touch a file descriptor.

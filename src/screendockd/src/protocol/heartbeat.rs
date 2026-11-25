@@ -5,30 +5,9 @@
 //! trailing newline. The session id is a digit string chosen once per run and kept constant,
 //! since a changed id makes the dock re-announce itself.
 
-use thiserror::Error;
-
 use super::framing::MessageBuilder;
-
-/// The JSON-RPC method name of the heartbeat.
-pub const HEARTBEAT_METHOD: &str = "heartbeat";
-
-/// Longest accepted session id, in digits.
-const SESSION_ID_MAX_LEN: usize = 20;
-
-/// Errors from constructing a [`SessionId`].
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum SessionIdError {
-    /// The id was empty or longer than the accepted maximum.
-    #[error("session id must be 1 to {SESSION_ID_MAX_LEN} characters, got {0}")]
-    BadLength(usize),
-    /// The id contained a character that is not an ASCII digit.
-    #[error("session id must contain only ASCII digits")]
-    NotDigits,
-}
-
-/// The heartbeat `session-id`: a non-empty string of ASCII digits.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionId(String);
+use super::types::SESSION_ID_MAX_LEN;
+pub use super::types::{SessionId, SessionIdError, HEARTBEAT_METHOD};
 
 impl SessionId {
     /// Validates a session id string.

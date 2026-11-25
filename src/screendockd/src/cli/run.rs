@@ -1,7 +1,6 @@
 //! The `run` subcommand.
 
 use anyhow::{Context, Result};
-use clap::Args;
 
 use crate::adapters::capture::create_backend;
 use crate::adapters::encode::create_encoder;
@@ -10,26 +9,10 @@ use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use crate::ports::encode::EncoderSettings;
 use crate::utils::config::Config;
 
-use super::args::{BackendArg, EncoderArgs, HandshakeArgs, NodeArgs};
 use super::support::{
     device_ids, geometry, resolve_nodes, session_settings, shutdown_flag, warn_if_not_char_device,
 };
-
-#[derive(Debug, Args)]
-pub(super) struct RunArgs {
-    #[command(flatten)]
-    pub(super) nodes: NodeArgs,
-    #[command(flatten)]
-    pub(super) encoder: EncoderArgs,
-    /// Capture backend, overriding the configured `capture.backend`.
-    #[arg(long, value_enum)]
-    pub(super) backend: Option<BackendArg>,
-    /// Stop after this many frames (dry runs and tests). Default: run until SIGINT/SIGTERM.
-    #[arg(long)]
-    pub(super) max_frames: Option<u64>,
-    #[command(flatten)]
-    pub(super) handshake: HandshakeArgs,
-}
+use super::types::RunArgs;
 
 pub(super) fn run(args: RunArgs, config: &Config) -> Result<()> {
     let geometry = geometry(config)?;

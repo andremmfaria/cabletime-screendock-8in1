@@ -3,3 +3,4 @@
 
 pub mod discovery;
 pub mod hidraw;
+pub mod types;

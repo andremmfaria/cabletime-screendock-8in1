@@ -15,8 +15,8 @@ use crate::protocol::framing::PictureSize;
 use crate::utils::config::{self, Config};
 
 #[cfg(feature = "tools")]
-use super::args::StreamArgs;
-use super::args::{HandshakeArgs, NodeArgs};
+use super::types::StreamArgs;
+use super::types::{HandshakeArgs, NodeArgs};
 
 pub(super) fn load_config(path: Option<&PathBuf>) -> Result<Config> {
     match path {

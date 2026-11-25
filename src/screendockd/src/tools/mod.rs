@@ -3,4 +3,5 @@
 
 pub mod bench;
 pub mod heartbeat_loop;
+pub mod types;
 pub mod validation;

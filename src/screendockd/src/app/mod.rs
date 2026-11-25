@@ -2,3 +2,4 @@
 //! together through their ports.
 
 pub mod daemon;
+pub mod types;
