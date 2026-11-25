@@ -67,3 +67,40 @@ jobs:
 
       - name: Lint with capture-wayland feature
         run: cargo clippy --all-targets --features capture-wayland -- -D warnings
+
+  # First real compile of the libx264 encoder: needs the libav development files, clang for
+  # bindgen, and the ffmpeg binary so the test can decode what the encoder produced.
+  encode-ffmpeg:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/screendockd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/screendockd
+          key: encode-ffmpeg
+
+      - name: Install libav development packages
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
+          libx264-dev clang pkg-config ffmpeg xvfb
+
+      - name: Lint with encode-ffmpeg feature
+        run: cargo clippy --all-targets --features encode-ffmpeg -- -D warnings
+
+      # SCREENDOCK_REQUIRE_FFMPEG makes a missing ffmpeg binary a failure instead of a skip.
+      - name: Test with encode-ffmpeg feature
+        run: cargo test --features encode-ffmpeg --verbose
+        env:
+          SCREENDOCK_REQUIRE_XVFB: "1"
+          SCREENDOCK_REQUIRE_FFMPEG: "1"
