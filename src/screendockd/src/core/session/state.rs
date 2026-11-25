@@ -1,12 +1,15 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::{mpsc, Mutex};
+use std::time::{Duration, Instant};
 
 use tracing::debug;
 
+use super::types::ControllerCommand;
 pub(super) use super::types::Shared;
 pub use super::types::{SessionHandle, SessionState, SessionStats};
+use super::SessionError;
 use crate::core::policy::{DOCK_ALIVE_WINDOW, POLL_SLICE};
+use crate::protocol::framing::PictureSize;
 
 impl SessionState {
     fn as_u8(self) -> u8 {
@@ -23,6 +26,7 @@ impl SessionState {
             5 => Self::Active,
             6 => Self::AssumedActive,
             7 => Self::Lost,
+            8 => Self::Renegotiating,
             _ => Self::Stopped,
         }
     }
@@ -34,10 +38,11 @@ impl SessionState {
 }
 
 impl Shared {
-    pub(super) fn new(state: SessionState) -> Self {
+    pub(super) fn new(state: SessionState, size: PictureSize) -> Self {
         Self {
             state: AtomicU8::new(state.as_u8()),
             generation: AtomicU64::new(0),
+            size: AtomicU64::new(pack_size(size)),
             stop: AtomicBool::new(false),
             base: Instant::now(),
             dock_heartbeats: AtomicU64::new(0),
@@ -50,6 +55,10 @@ impl Shared {
             loss_reason: Mutex::new(None),
             fatal: Mutex::new(None),
         }
+    }
+
+    pub(super) fn set_size(&self, size: PictureSize) {
+        self.size.store(pack_size(size), Ordering::Release);
     }
 
     pub(super) fn state(&self) -> SessionState {
@@ -116,6 +125,42 @@ impl SessionHandle {
         slot.get_or_insert_with(|| reason.to_string());
     }
 
+    /// The picture size the dock was last launched at.
+    pub fn size(&self) -> PictureSize {
+        unpack_size(self.shared.size.load(Ordering::Acquire))
+    }
+
+    /// Times the session became armed, the first handshake and every cycle or redo.
+    pub fn handshakes(&self) -> u64 {
+        self.shared.handshakes.load(Ordering::Relaxed)
+    }
+
+    /// Times an armed session was lost.
+    pub fn losses(&self) -> u64 {
+        self.shared.losses.load(Ordering::Relaxed)
+    }
+
+    /// Runs the dock cycle at `size` and waits until the session is armed again. Video is held
+    /// back while it runs and the heartbeat continues. An error reply from the dock fails it;
+    /// a silent dock does not. On failure the session goes back to the previous size and redoes
+    /// the handshake there. `timeout` bounds the wait, not the cycle: a cycle that outlives it
+    /// still completes.
+    pub fn renegotiate(&self, size: PictureSize, timeout: Duration) -> Result<(), SessionError> {
+        let commands = self
+            .commands
+            .as_ref()
+            .ok_or(SessionError::RenegotiationUnavailable)?;
+        let (reply, answer) = mpsc::channel();
+        commands
+            .send(ControllerCommand::Renegotiate { size, reply })
+            .map_err(|_| SessionError::SessionClosed)?;
+        match answer.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(SessionError::RenegotiationTimedOut),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(SessionError::SessionClosed),
+        }
+    }
+
     /// The error that ended the session for good (reader died), if any.
     pub fn fatal(&self) -> Option<String> {
         self.shared
@@ -124,6 +169,14 @@ impl SessionHandle {
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
+}
+
+fn pack_size(size: PictureSize) -> u64 {
+    (u64::from(size.width.0) << 32) | u64::from(size.height.0)
+}
+
+fn unpack_size(packed: u64) -> PictureSize {
+    PictureSize::new((packed >> 32) as u32, (packed & 0xFFFF_FFFF) as u32)
 }
 
 /// Sleeps until `deadline` in short slices; returns false when stopped first.

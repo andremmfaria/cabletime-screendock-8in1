@@ -1,7 +1,7 @@
 //! Types of the dock session: state, settings, handle, statistics, errors and the shared state.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -18,6 +18,34 @@ use crate::protocol::heartbeat::SessionId;
 pub struct Session {
     pub(super) shared: Arc<Shared>,
     pub(super) threads: Vec<(&'static str, JoinHandle<()>)>,
+    pub(super) commands: Option<Sender<ControllerCommand>>,
+}
+
+/// A request to the controller thread.
+#[derive(Debug)]
+pub(super) enum ControllerCommand {
+    /// Run the stop, launch and start cycle at a new picture size and answer when the session
+    /// is armed again or the cycle failed.
+    Renegotiate {
+        size: PictureSize,
+        reply: Sender<Result<(), SessionError>>,
+    },
+}
+
+/// A renegotiation in progress: the size to return to when it fails, and who is waiting.
+pub(super) struct Renegotiation {
+    pub(super) previous: PictureSize,
+    pub(super) reply: Sender<Result<(), SessionError>>,
+}
+
+/// Why `Controller::monitor` returned.
+pub(super) enum MonitorEnd {
+    /// The session shut down or its reader died.
+    Stopped,
+    /// The armed session was lost.
+    Lost(String),
+    /// A client asked for another picture size.
+    Command(ControllerCommand),
 }
 
 pub(super) type SharedWriter = Arc<Mutex<Box<dyn DockTransport>>>;
@@ -38,6 +66,7 @@ pub(super) struct Controller {
     pub(super) shared: Arc<Shared>,
     pub(super) writer: SharedWriter,
     pub(super) events: Receiver<DockEvent>,
+    pub(super) commands: Receiver<ControllerCommand>,
     pub(super) next_id: u64,
     /// A ready announcement the monitor consumed; the next handshake starts from it instead
     /// of waiting for another one.
@@ -85,6 +114,15 @@ pub enum SessionError {
     /// A session thread panicked.
     #[error("{0} thread panicked")]
     Panicked(&'static str),
+    /// The session runs without a handshake, so there is nothing to renegotiate.
+    #[error("the session has no handshake to redo")]
+    RenegotiationUnavailable,
+    /// The cycle did not finish within the caller's timeout. It may still complete later.
+    #[error("the dock cycle did not finish in time")]
+    RenegotiationTimedOut,
+    /// The session ended before the cycle finished.
+    #[error("the session ended during the dock cycle")]
+    SessionClosed,
 }
 
 /// An event the reader forwards to the controller.
@@ -135,6 +173,8 @@ pub enum SessionState {
     AssumedActive,
     /// The session was lost or the handshake failed; video is held back until it is redone.
     Lost,
+    /// The stop, launch and start cycle runs at a new picture size; video is held back.
+    Renegotiating,
     /// The session was shut down or its reader died.
     Stopped,
 }
@@ -145,6 +185,8 @@ pub(super) struct Shared {
     pub(super) state: AtomicU8,
     /// Incremented each time the session becomes armed.
     pub(super) generation: AtomicU64,
+    /// Picture size the dock was last launched at, as `width << 32 | height`.
+    pub(super) size: AtomicU64,
     pub(super) stop: AtomicBool,
     pub(super) base: Instant,
     pub(super) dock_heartbeats: AtomicU64,
@@ -163,6 +205,7 @@ pub(super) struct Shared {
 #[derive(Debug, Clone)]
 pub struct SessionHandle {
     pub(super) shared: Arc<Shared>,
+    pub(super) commands: Option<Sender<ControllerCommand>>,
 }
 
 /// Counters from a finished session.

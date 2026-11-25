@@ -44,6 +44,8 @@ pub struct VideoStats {
     pub layout_violations: u64,
     /// Width and height of the first video message.
     pub first_size: Option<(u32, u32)>,
+    /// Width and height of the video messages in order, one entry per change of size.
+    pub sizes: Vec<(u32, u32)>,
     /// Number of complete host control messages (heartbeats included) logged when the first
     /// video report arrived.
     pub control_messages_before_video: Option<usize>,
@@ -64,6 +66,12 @@ pub(super) struct DockState {
     pub(super) allowed_sent_at: Option<Instant>,
     pub(super) video: VideoStats,
     pub(super) launch_error: bool,
+    /// Size that `app-launched` is refused at.
+    pub(super) rejected_size: Option<(u32, u32)>,
+    /// Size of every `app-launched` request, in order.
+    pub(super) launch_sizes: Vec<(u32, u32)>,
+    /// Video messages left before the session is dropped.
+    pub(super) drop_after: Option<u64>,
 }
 
 /// Side effect applied when a scheduled message is sent.

@@ -11,7 +11,7 @@ use screendockd::app::daemon::{run, DaemonParams, PipelineKnobs};
 use screendockd::app::pipeline::{EncoderPipeline, PipelineState};
 use screendockd::app::supervisor::Supervisor;
 use screendockd::core::reconfig::LiveSettings;
-use screendockd::core::session::SessionSettings;
+use screendockd::core::session::{Session, SessionError, SessionSettings, SessionState};
 use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::ports::control::Command;
 use screendockd::ports::encode::{
@@ -19,6 +19,7 @@ use screendockd::ports::encode::{
 };
 use screendockd::protocol::control::{ControlRequest, ControlResponse};
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
+use screendockd::protocol::framing::{MessageBuilder, PictureSize};
 use screendockd::testing::fake_dock::{FakeDock, FakeDockConfig};
 use screendockd::utils::config::load_from_path;
 
@@ -203,4 +204,196 @@ fn live_bitrate_and_keyframe_interval_changes_need_no_new_handshake() {
     let beats = dock.heartbeat_times();
     let widest = beats.windows(2).map(|w| w[1] - w[0]).max().unwrap();
     assert!(widest < Duration::from_secs(2), "heartbeat gap {widest:?}");
+}
+
+fn fast_settings(size: PictureSize) -> SessionSettings {
+    let mut settings = SessionSettings::new(size, Duration::from_millis(50));
+    settings.machine_name = "TESTHOST".into();
+    settings.ready_timeout = Duration::from_millis(400);
+    settings.reply_timeout = Duration::from_millis(400);
+    settings.settle_delay = Duration::from_millis(100);
+    settings.retry_delay = Duration::from_millis(50);
+    settings
+}
+
+fn old() -> PictureSize {
+    PictureSize::new(1280, 720)
+}
+
+fn new_size() -> PictureSize {
+    PictureSize::new(1600, 900)
+}
+
+fn armed_session(config: FakeDockConfig) -> (FakeDock, Session) {
+    let (dock, mi00) = FakeDock::spawn(config);
+    let session = Session::start(mi00, fast_settings(old())).unwrap();
+    let handle = session.handle();
+    wait_for("the first handshake", || handle.is_armed());
+    (dock, session)
+}
+
+#[test]
+fn renegotiation_runs_stop_launch_at_the_new_size_and_start_in_order() {
+    let (dock, session) = armed_session(FakeDockConfig::fresh());
+    let handle = session.handle();
+    let before = handle.generation();
+    let first = dock.host_methods().len();
+
+    session
+        .renegotiate(new_size(), Duration::from_secs(5))
+        .unwrap();
+
+    let cycle: Vec<String> = dock.host_methods().split_off(first);
+    let launch_at = cycle.iter().position(|m| m == "app-launched").unwrap();
+    let stopped_at = cycle
+        .iter()
+        .position(|m| m == "notify-projection-stopped")
+        .unwrap();
+    let started_at = cycle
+        .iter()
+        .position(|m| m == "notify-projection-started")
+        .unwrap();
+    assert!(
+        stopped_at < launch_at && launch_at < started_at,
+        "{cycle:?}"
+    );
+    assert_eq!(dock.launch_sizes(), [(1280, 720), (1600, 900)]);
+    assert!(handle.is_armed());
+    assert_eq!(handle.state(), SessionState::Active);
+    assert_eq!(handle.size(), new_size());
+    assert_eq!(handle.generation(), before + 1);
+    let beats = dock.heartbeat_times();
+    let widest = beats.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+    assert!(widest < Duration::from_secs(2), "heartbeat gap {widest:?}");
+}
+
+#[test]
+fn renegotiation_sends_the_stop_even_to_a_silent_dock_and_arms_assumed_active() {
+    let (dock, session) = armed_session(FakeDockConfig::holding_session());
+    let handle = session.handle();
+    assert!(!dock
+        .host_methods()
+        .contains(&"notify-projection-stopped".to_string()));
+
+    session
+        .renegotiate(new_size(), Duration::from_secs(5))
+        .unwrap();
+
+    assert!(dock
+        .host_methods()
+        .contains(&"notify-projection-stopped".to_string()));
+    assert_eq!(dock.launch_sizes().last(), Some(&(1600, 900)));
+    assert_eq!(handle.state(), SessionState::AssumedActive);
+}
+
+#[test]
+fn video_headers_follow_the_new_size_and_none_is_written_while_the_cycle_runs() {
+    let (dock, mi00, mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
+    let session = Session::start(mi00, fast_settings(old())).unwrap();
+    let handle = session.handle();
+    wait_for("the first handshake", || handle.is_armed());
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let stop = Arc::clone(&stop);
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            let mut mi01 = mi01;
+            let mut written_unarmed = 0u32;
+            while !stop.load(Ordering::Relaxed) {
+                if handle.is_armed() {
+                    let size = handle.size();
+                    let chunks = MessageBuilder::video(size)
+                        .payload(&[0, 0, 0, 1, 0x41, 4])
+                        .build();
+                    let _ = mi01.write_chunks(&chunks);
+                } else {
+                    written_unarmed += 1;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            written_unarmed
+        })
+    };
+    wait_for("video at the old size", || {
+        dock.video_stats().sizes == [(1280, 720)]
+    });
+
+    session
+        .renegotiate(new_size(), Duration::from_secs(5))
+        .unwrap();
+    wait_for("video at the new size", || {
+        dock.video_stats().sizes == [(1280, 720), (1600, 900)]
+    });
+    stop.store(true, Ordering::Relaxed);
+    let skipped = writer.join().unwrap();
+    assert!(skipped > 0, "the writer saw the session unarmed");
+    assert_eq!(dock.video_stats().layout_violations, 0);
+}
+
+#[test]
+fn a_size_the_dock_refuses_fails_the_cycle_and_the_old_size_comes_back() {
+    let (dock, session) = armed_session(FakeDockConfig::fresh());
+    let handle = session.handle();
+    dock.reject_size(new_size());
+
+    let result = session.renegotiate(new_size(), Duration::from_secs(5));
+    assert!(
+        matches!(result, Err(SessionError::Rejected { .. })),
+        "{result:?}"
+    );
+    assert_eq!(handle.size(), old());
+
+    wait_for("the old size to be armed again", || {
+        handle.is_armed() && dock.launch_sizes().last() == Some(&(1280, 720))
+    });
+    assert_eq!(handle.size(), old());
+    assert!(handle.is_armed());
+}
+
+#[test]
+fn renegotiation_without_a_handshake_is_unavailable() {
+    let (_dock, mi00) = FakeDock::spawn(FakeDockConfig::fresh());
+    let session = Session::start(mi00, fast_settings(old()).without_handshake()).unwrap();
+    assert!(matches!(
+        session.renegotiate(new_size(), Duration::from_millis(100)),
+        Err(SessionError::RenegotiationUnavailable)
+    ));
+}
+
+#[test]
+fn two_renegotiations_in_a_row_are_served_in_order() {
+    let (dock, session) = armed_session(FakeDockConfig::fresh());
+    let handle = session.handle();
+    let other = handle.clone();
+    let first = std::thread::spawn(move || {
+        other.renegotiate(PictureSize::new(1600, 900), Duration::from_secs(10))
+    });
+    session
+        .renegotiate(PictureSize::new(960, 540), Duration::from_secs(10))
+        .unwrap();
+    first.join().unwrap().unwrap();
+    let launches = dock.launch_sizes();
+    assert_eq!(launches.len(), 3, "{launches:?}");
+    assert!(handle.is_armed());
+}
+
+#[test]
+fn the_dock_dropping_the_session_after_some_video_is_noticed() {
+    let (dock, mi00, mi01) = FakeDock::spawn_with_video(FakeDockConfig::fresh());
+    let session = Session::start(mi00, fast_settings(old())).unwrap();
+    let handle = session.handle();
+    wait_for("the first handshake", || handle.is_armed());
+    dock.drop_session_after(3);
+    let mut mi01 = mi01;
+    for _ in 0..3 {
+        let chunks = MessageBuilder::video(old())
+            .payload(&[0, 0, 0, 1, 0x41, 4])
+            .build();
+        mi01.write_chunks(&chunks).unwrap();
+    }
+    wait_for("the loss", || handle.losses() >= 1);
+    wait_for("the handshake again", || {
+        handle.is_armed() && handle.handshakes() >= 2
+    });
 }

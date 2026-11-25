@@ -116,6 +116,9 @@ impl FakeDock {
                 allowed_sent_at: None,
                 video: VideoStats::default(),
                 launch_error: false,
+                rejected_size: None,
+                launch_sizes: Vec::new(),
+                drop_after: None,
             }),
             config,
             stop: AtomicBool::new(false),
@@ -186,10 +189,42 @@ impl FakeDock {
 
     /// The dock loses its session: the sink stops and ready announcements restart.
     pub fn drop_session(&self) {
-        let mut state = self.inner.lock();
-        state.app_known = false;
-        state.sink_started = false;
-        state.next_ready = Instant::now();
+        drop_session(&mut self.inner.lock());
+    }
+
+    /// Makes the dock answer `app-launched` with an error object whenever the request names
+    /// `size`, and with a result otherwise.
+    pub fn reject_size(&self, size: PictureSize) {
+        self.inner.lock().rejected_size = Some((size.width.0, size.height.0));
+    }
+
+    /// Accepts every size again.
+    pub fn accept_all_sizes(&self) {
+        self.inner.lock().rejected_size = None;
+    }
+
+    /// The size named by every `app-launched` request so far, in order.
+    pub fn launch_sizes(&self) -> Vec<(u32, u32)> {
+        self.inner.lock().launch_sizes.clone()
+    }
+
+    /// The method of every host message so far except heartbeats, in order. Messages without
+    /// a method (none are expected) are skipped.
+    pub fn host_methods(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .host_log
+            .iter()
+            .filter_map(|(_, text)| serde_json::from_slice::<Value>(text).ok())
+            .filter_map(|msg| msg.get("method").and_then(Value::as_str).map(String::from))
+            .filter(|method| method != "heartbeat")
+            .collect()
+    }
+
+    /// The dock loses its session after it has received `messages` more complete video
+    /// messages (needs `spawn_with_video`).
+    pub fn drop_session_after(&self, messages: u64) {
+        self.inner.lock().drop_after = Some(messages);
     }
 
     /// Stops the fake and joins its thread.
@@ -209,6 +244,12 @@ impl Drop for FakeDock {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+fn drop_session(state: &mut DockState) {
+    state.app_known = false;
+    state.sink_started = false;
+    state.next_ready = Instant::now();
 }
 
 fn send(sock: &UnixDatagram, state: &mut DockState, payload: &[u8]) {
@@ -267,9 +308,19 @@ fn handle_host_report(
             if platform.is_some() {
                 state.app_known = true;
             }
+            let launched_at = params.and_then(|p| {
+                Some((
+                    u32::try_from(p.get("res-width")?.as_u64()?).ok()?,
+                    u32::try_from(p.get("res-height")?.as_u64()?).ok()?,
+                ))
+            });
+            if let Some(size) = launched_at {
+                state.launch_sizes.push(size);
+            }
+            let refused = launched_at.is_some() && launched_at == state.rejected_size;
             if let (Some(id), Some(delay)) = (id, inner.config.launch_reply_delay) {
                 let seq = state.seq + 1000;
-                let reply = if state.launch_error {
+                let reply = if state.launch_error || refused {
                     format!(
                         "{{\n\t\"id\":\t{id},\n\t\"error\":\t{{\"code\":-32000}},\n\t\"jrpcSeq\":\t{seq}\n}}"
                     )
@@ -401,6 +452,17 @@ fn drain_video(video: &UnixDatagram, state: &mut DockState, buf: &mut [u8]) {
                 state.video.layout_violations += 1;
             }
             state.video.first_size.get_or_insert((width, height));
+            if state.video.sizes.last() != Some(&(width, height)) {
+                state.video.sizes.push((width, height));
+            }
+            if let Some(left) = state.drop_after {
+                if left <= 1 {
+                    state.drop_after = None;
+                    drop_session(state);
+                } else {
+                    state.drop_after = Some(left - 1);
+                }
+            }
         } else if report[1..16].iter().any(|&b| b != 0) {
             state.video.layout_violations += 1;
         }

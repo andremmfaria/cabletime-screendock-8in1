@@ -41,6 +41,11 @@ impl SessionSettings {
         }
     }
 
+    /// Longest a dock cycle can take with these timeouts, plus a margin for scheduling.
+    pub fn cycle_timeout(&self) -> Duration {
+        self.reply_timeout * 2 + self.settle_delay + self.retry_delay + Duration::from_secs(2)
+    }
+
     /// Same settings without the handshake and without the reader.
     pub fn without_handshake(mut self) -> Self {
         self.handshake = false;

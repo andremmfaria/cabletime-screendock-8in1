@@ -14,6 +14,12 @@
 //! session), or heartbeat or video writes keep failing, the session is lost and the full
 //! handshake is run without restarting the process.
 //!
+//! A running session can change the picture size: [`Session::renegotiate`] sends a request to
+//! the controller, which leaves the armed state, runs `notify-projection-stopped`,
+//! `app-launched` at the new size, the cursor message and `notify-projection-started`, waits
+//! out the settle delay and arms again with a new generation. Video is held back for the whole
+//! cycle and the heartbeat thread is not involved.
+//!
 //! Threads, all owned by [`Session`]:
 //! - heartbeat: one fixed-deadline writer, independent of video writes (they use MI_01);
 //! - reader: polls MI_00, reassembles and parses the dock's JSON, answers the dock's EDID
@@ -40,6 +46,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 pub use settings::SessionSettings;
 pub use state::{SessionHandle, SessionState, SessionStats};
@@ -53,7 +60,7 @@ use state::Shared;
 pub use self::types::Session;
 use self::types::SharedWriter;
 use crate::ports::transport::{DockTransport, TransportError};
-use crate::protocol::framing::{MessageBuilder, ReportId, FIRST_CHUNK_PAYLOAD_MAX};
+use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId, FIRST_CHUNK_PAYLOAD_MAX};
 use crate::protocol::heartbeat::heartbeat_message;
 
 fn send_control(writer: &SharedWriter, payload: &[u8]) -> Result<(), SessionError> {
@@ -95,7 +102,7 @@ impl Session {
         } else {
             SessionState::Active
         };
-        let shared = Arc::new(Shared::new(initial));
+        let shared = Arc::new(Shared::new(initial, settings.size));
 
         {
             let mut handle = writer.lock().unwrap_or_else(|e| e.into_inner());
@@ -106,6 +113,7 @@ impl Session {
         shared.heartbeats_sent.store(1, Ordering::Relaxed);
 
         let mut threads: Vec<(&'static str, JoinHandle<()>)> = Vec::new();
+        let mut commands = None;
         let hb_shared = Arc::clone(&shared);
         let hb_writer = Arc::clone(&writer);
         let hb_settings = settings.clone();
@@ -128,6 +136,8 @@ impl Session {
                     .spawn(move || reader_thread(reader_handle, &rd_writer, &tx, &rd_shared))
                     .map_err(|e| SessionError::Setup(TransportError::Clone(e)))?,
             ));
+            let (command_tx, command_rx) = mpsc::channel();
+            commands = Some(command_tx);
             let ctl_shared = Arc::clone(&shared);
             let ctl_writer = Arc::clone(&writer);
             threads.push((
@@ -140,6 +150,7 @@ impl Session {
                             shared: ctl_shared,
                             writer: ctl_writer,
                             events: rx,
+                            commands: command_rx,
                             next_id: 1,
                             ready_pending: false,
                         };
@@ -152,14 +163,24 @@ impl Session {
             shared.handshakes.store(1, Ordering::Relaxed);
         }
 
-        Ok(Self { shared, threads })
+        Ok(Self {
+            shared,
+            threads,
+            commands,
+        })
     }
 
     /// A cloneable view for the video loop.
     pub fn handle(&self) -> SessionHandle {
         SessionHandle {
             shared: Arc::clone(&self.shared),
+            commands: self.commands.clone(),
         }
+    }
+
+    /// Runs the dock cycle at a new picture size; see [`SessionHandle::renegotiate`].
+    pub fn renegotiate(&self, size: PictureSize, timeout: Duration) -> Result<(), SessionError> {
+        self.handle().renegotiate(size, timeout)
     }
 
     /// Stops all threads and returns the counters.
