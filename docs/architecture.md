@@ -46,6 +46,8 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `adapters::control` | `ControlServer` (the 0600 Unix socket and its accept thread, removed on drop) and `UnixControlClient`; `socket_path` resolves the path from the config | Implemented, unit tested, tested against the daemon binary |
 | `app::supervisor` | `Supervisor`, the single owner of the live settings: handles `Command`s, validates and classifies each change with `plan_change_with`, applies it through a `PipelineHandle` or rejects it, and answers `status` and `get`. Config reload and SIGHUP use the same path. See [control.md](control.md#changing-settings) | Implemented, unit tested |
 | `core::reconfig::keys` | The names of the live settings on the control interface: `SettingKey`, `setting_values`, `changed_keys` and `answer_read`, which answers `status` and `get` | Implemented, unit tested |
+| `core::keyframe` | `KeyframeClock`: which frames the encoder is asked to make keyframes, with an interval that can change while it runs | Implemented, unit tested |
+| `app::pipeline` | `PipelineState` (hand-over of bit rate and keyframe interval from the supervisor to the video loop) and `EncoderPipeline`, the `PipelineHandle` of a running daemon | Implemented, unit tested |
 | `core::display_policy` | Pure display policy: `decide` chooses mirror or a virtual monitor mechanism (`X11Randr` with its tier, `Mutter`, `Portal`, `Wlroots`) from `DisplayFacts` and the `[virtual_display]` section, `virtual_support` reports `Supported`, `Unsupported` with a reason or `Unknown`, and `place_monitor` computes the monitor rectangle from the placement, anchor and size | Implemented, unit tested |
 | `ports::display` | `DisplayFacts` (display server, desktop, outputs, RandR version, spare output, Mutter ScreenCast, portal source types, sway socket), `OutputFacts`, `OutputId` and `Rect` | Implemented, unit tested |
 | `core::reconfig` | The live settings model: `LiveSettings` (every setting that can change while the daemon runs), `SettingsPatch` (a validated partial change), `ChangeClass`, `ReconfigAction`, `ReconfigPlan` and the pure `plan_change`. See [Live settings and change classes](#live-settings-and-change-classes) | Implemented, unit tested |
@@ -62,8 +64,8 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 |---|---|
 | `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `DisplayMode`, `Placement`, `WaylandBackend`, `FallbackPolicy`, `EdidSource`, `VirtualDisplayConfig`, `ControlConfig`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
 | `protocol` | `ControlRequest`, `ControlResponse`, `ControlWireError`, the control line caps, `ReportId`, `FrameHeader`, `ParsedMessage`, `MessageBuilder`, `FramingError`, the report size constants, `AnnexBError`, the NAL type constants, `Orientation`, `DisplayGeometry`, `DisplayError`, `SessionId`, `SessionIdError`, `DockMessage`, `InboundAssembler`, the host message constants |
-| `ports` | `Command`, `ControlClient`, `ControlError`, `OutputId`, `Rect`, `DisplayServer`, `OutputFacts`, `DisplayFacts`, `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
-| `core` | the session timing defaults and polling constants, and the display policy types `DisplayDecision`, `ExtendBackend`, `X11Tier`, `VirtualSupport` and `DisplayPolicyError` |
+| `ports` | `Command`, `ControlClient`, `ControlError`, `OutputId`, `Rect`, `DisplayServer`, `OutputFacts`, `DisplayFacts`, `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `RateSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
+| `core` | `KeyframeClock`, the session timing defaults and polling constants, and the display policy types `DisplayDecision`, `ExtendBackend`, `X11Tier`, `VirtualSupport` and `DisplayPolicyError` |
 | `core::reconfig` | `SettingKey`, `LiveSettings`, `SettingsPatch`, `SettingsError`, `ChangeClass`, `ReconfigAction`, `ReconfigPlan`, `PlanOptions` and the range limits |
 | `core::session` | `Session`, `SessionState`, `SessionHandle`, `SessionStats`, `SessionSettings`, `SessionError`, the shared state, the controller and reader event types |
 | `adapters` | nothing of its own; the subdirectories hold the adapter types |
@@ -71,7 +73,7 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 | `adapters::capture` | `SessionType`, `BackendKind`, `X11ShmCapture`, `WaylandPortalCapture` and the Wayland stream state |
 | `adapters::encode` | `EncoderKind`, `FfmpegEncoder`, `PrerecordedEncoder` |
 | `adapters::transport` | `HidrawHandle`, `Mi00Path`, `Mi01Path`, `DeviceIds`, `DockHidrawPaths`, `DiscoveryError`, the discovery constants |
-| `app` | `DaemonParams`, `DaemonReport`, `DaemonError`, the daemon constants, `Supervisor`, the `PipelineHandle` trait, `NullPipeline` and `ReloadFn` |
+| `app` | `DaemonParams`, `DaemonReport`, `DaemonError`, the daemon constants, `Supervisor`, the `PipelineHandle` trait, `NullPipeline`, `ReloadFn`, `PipelineKnobs`, `PipelineState` and `EncoderPipeline` |
 | `cli` | the clap argument structs and enums, the parsed command and `Services` (the supervisor, SIGHUP and control socket of a running daemon) |
 | `tools` | the replay, isolate, heartbeat and bench parameter, report and statistics types and their errors |
 | `testing` | `FakeDock`, `FakeDockConfig`, `StartedReply`, `VideoStats` and the fake dock state |

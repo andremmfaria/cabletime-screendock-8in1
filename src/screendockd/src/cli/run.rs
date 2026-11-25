@@ -15,8 +15,9 @@ use crate::adapters::capture::create_backend;
 use crate::adapters::control::{socket_path, ControlServer};
 use crate::adapters::encode::create_encoder;
 use crate::adapters::transport::hidraw::HidrawHandle;
-use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
-use crate::app::supervisor::{NullPipeline, ReloadFn, Supervisor};
+use crate::app::daemon::{self, DaemonParams, PipelineKnobs, DEFAULT_MAX_CONSECUTIVE_ERRORS};
+use crate::app::pipeline::{EncoderPipeline, PipelineState};
+use crate::app::supervisor::{PipelineHandle, ReloadFn, Supervisor};
 use crate::core::reconfig::LiveSettings;
 use crate::ports::control::Command;
 use crate::ports::encode::EncoderSettings;
@@ -47,7 +48,20 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
     let mut encoder =
         create_encoder(&args.encoder.kind(), settings).context("failed to start encoder")?;
     let stop = shutdown_flag()?;
-    let services = Services::start(config, live, reload_source(config_path.cloned()))?;
+    let pipeline = PipelineState::new(
+        PipelineKnobs {
+            bitrate_kbps: live.bitrate_kbps,
+            vbv_buffer_ms: live.vbv_buffer_ms,
+            keyframe_interval: live.keyframe_interval,
+        },
+        encoder.supports_live_rate(),
+    );
+    let services = Services::start(
+        config,
+        live,
+        reload_source(config_path.cloned()),
+        Box::new(EncoderPipeline::new(std::sync::Arc::clone(&pipeline))),
+    )?;
     tracing::info!(
         capture = capture.name(),
         encoder = encoder.name(),
@@ -60,6 +74,7 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         session: session_settings(config, geometry.size(), &args.handshake),
         max_frames: args.max_frames,
         max_consecutive_errors: DEFAULT_MAX_CONSECUTIVE_ERRORS,
+        pipeline,
     };
     let result = daemon::run(
         mi00_handle,
@@ -87,7 +102,12 @@ fn reload_source(path: Option<PathBuf>) -> ReloadFn {
 impl Services {
     /// Starts the supervisor thread, the SIGHUP thread and, when the config enables it and a
     /// socket path exists, the control socket.
-    pub(super) fn start(config: &Config, live: LiveSettings, reload: ReloadFn) -> Result<Self> {
+    pub(super) fn start(
+        config: &Config,
+        live: LiveSettings,
+        reload: ReloadFn,
+        pipeline: Box<dyn PipelineHandle>,
+    ) -> Result<Self> {
         let (commands, inbox) = mpsc::channel();
         let halt = Arc::new(AtomicBool::new(false));
 
@@ -109,7 +129,7 @@ impl Services {
             None
         };
 
-        let supervisor = Supervisor::new(live, reload, Box::new(NullPipeline))
+        let supervisor = Supervisor::new(live, reload, pipeline)
             .with_status_field("version", env!("CARGO_PKG_VERSION"))
             .with_status_field("pid", std::process::id().to_string());
         let supervisor = std::thread::Builder::new()

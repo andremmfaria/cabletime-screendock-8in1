@@ -15,6 +15,12 @@ use ffmpeg_next as ffmpeg;
 use crate::ports::encode::EncoderSettings;
 use crate::ports::encode::VideoMessage;
 
+/// Frames between the keyframes libx264 inserts on its own. It sits above every interval the
+/// daemon accepts, so keyframes come only from the caller's clock and the interval can change
+/// while the encoder runs.
+#[cfg(feature = "encode-ffmpeg")]
+pub(super) const KEYFRAME_CEILING: u32 = 3600;
+
 /// Which encoder `create_encoder` builds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncoderKind {

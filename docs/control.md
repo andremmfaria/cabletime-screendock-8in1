@@ -64,7 +64,24 @@ screendockd [--config PATH] ctl [--socket PATH] reload
 
 The settings of the running daemon are not written to the config file; they last until the daemon exits. Requests are handled one at a time in arrival order.
 
-The pipeline can record the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`. Changes to `resolution`, `orientation`, `fps`, `preset`, `tune`, `bitrate`, `vbv-buffer-ms`, `keyframe-interval` and `mode` need steps the pipeline cannot do and are rejected.
+The running pipeline executes these changes: `bitrate`, `vbv-buffer-ms` and `keyframe-interval` on the running encoder, the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`, which are recorded for the next switch to extend. Changes to `resolution`, `orientation`, `fps`, `preset`, `tune` and `mode` need steps the pipeline cannot do and are rejected.
+
+The video loop applies a bit rate or keyframe interval change at a frame boundary and the supervisor waits up to 3 seconds for it. If the encoder refuses the change, the answer is `rejected` with the encoder's reason and the previous values are restored. No dock handshake runs, no `app-launched` is sent and the heartbeat is not interrupted.
+
+### Class of every key
+
+| Key | Class | Steps |
+|---|---|---|
+| `bitrate`, `vbv-buffer-ms` | live when the encoder changes its rate in place, else rebuild | set the encoder rate, or rebuild the encoder |
+| `keyframe-interval` | live | change the keyframe clock |
+| `fps`, `preset`, `tune` | rebuild | rebuild the encoder |
+| `resolution`, `orientation` | dock cycle | rebuild the encoder, retarget capture and resize the monitor in extend mode, run the dock cycle |
+| `mode` | rebuild, dock cycle when the picture size changes too | create or destroy the monitor, rebuild the encoder, retarget capture |
+| `placement`, `anchor`, `x`, `y` | live in extend mode, no step in mirror mode | retarget capture |
+| `name`, `wayland-backend` | rebuild in extend mode, no step in mirror mode | recreate the monitor, retarget capture, rebuild the encoder |
+| `follow-system-changes` | live | none |
+
+The libx264 encoder changes its rate in place when the linked libavcodec applies the change to the running encoder. The daemon measures this once at startup by encoding noise frames, lowering the rate and checking that the frames get clearly smaller. When it does not hold, `bitrate` and `vbv-buffer-ms` are rebuild class and are rejected by the running pipeline. The prerecorded test encoder accepts rate changes without any effect.
 
 ## Reload and SIGHUP
 

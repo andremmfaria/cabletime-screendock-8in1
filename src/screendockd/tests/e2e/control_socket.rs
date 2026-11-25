@@ -115,6 +115,15 @@ fn ctl_set_applies_live_changes_and_rejects_what_the_pipeline_cannot_do() {
     let got = ctl(dir.path(), &["get", "resolution"]);
     assert_eq!(String::from_utf8(got.stdout).unwrap(), "1280x720\n");
 
+    // The bit rate and the keyframe interval change on the running encoder.
+    let rate = ctl(dir.path(), &["set", "bitrate", "2000"]);
+    assert_eq!(rate.status.code(), Some(0), "{rate:?}");
+    assert!(String::from_utf8_lossy(&rate.stdout).contains("applied (live): bitrate"));
+    let interval = ctl(dir.path(), &["set", "keyframe-interval", "5"]);
+    assert_eq!(interval.status.code(), Some(0), "{interval:?}");
+    let got = ctl(dir.path(), &["get", "bitrate"]);
+    assert_eq!(String::from_utf8(got.stdout).unwrap(), "2000\n");
+
     for bad in [
         ["bitrate", "abc"],
         ["volume", "3"],

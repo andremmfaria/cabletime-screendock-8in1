@@ -9,7 +9,7 @@ use std::path::Path;
 
 pub use super::types::PrerecordedEncoder;
 use crate::ports::capture::Frame;
-use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, RateSettings, VideoMessage};
 use crate::protocol::annexb::messages_from_annexb;
 
 impl PrerecordedEncoder {
@@ -45,6 +45,15 @@ impl Encoder for PrerecordedEncoder {
 
     fn request_keyframe(&mut self) {
         self.next = 0;
+    }
+
+    /// The replayed stream has a fixed rate, so a rate change has nothing to change.
+    fn set_rate(&mut self, _rate: RateSettings) -> Result<(), EncodeError> {
+        Ok(())
+    }
+
+    fn supports_live_rate(&self) -> bool {
+        true
     }
 }
 

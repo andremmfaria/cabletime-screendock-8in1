@@ -19,13 +19,16 @@ use std::time::Instant;
 
 use tracing::{debug, info, info_span, warn};
 
-pub use super::types::{DaemonError, DaemonParams, DaemonReport, DEFAULT_MAX_CONSECUTIVE_ERRORS};
+pub use super::types::{
+    DaemonError, DaemonParams, DaemonReport, PipelineKnobs, DEFAULT_MAX_CONSECUTIVE_ERRORS,
+};
 use super::types::{
     CAPTURE_RETRY_DELAY, STATS_INTERVAL, UNARMED_POLL, WRITE_FAILURES_BEFORE_REHANDSHAKE,
 };
+use crate::core::keyframe::KeyframeClock;
 use crate::core::session::{Session, SessionHandle};
 use crate::ports::capture::CaptureBackend;
-use crate::ports::encode::Encoder;
+use crate::ports::encode::{Encoder, RateSettings};
 use crate::ports::transport::DockTransport;
 use crate::protocol::framing::{MessageBuilder, ReportId};
 
@@ -101,6 +104,9 @@ fn video_loop(
     let mut write_failures: u32 = 0;
     let mut generation = 0u64;
     let mut last_stats = Instant::now();
+    let mut clock = KeyframeClock::new(params.pipeline.knobs().keyframe_interval);
+    let mut applied = params.pipeline.knobs();
+    let mut seen = 0u64;
     let fail = |consecutive: &mut u32, what: String| -> Result<(), DaemonError> {
         *consecutive += 1;
         if *consecutive >= params.max_consecutive_errors {
@@ -114,6 +120,11 @@ fn video_loop(
 
     while !stop.load(Ordering::Relaxed) && params.max_frames.is_none_or(|m| report.frames_sent < m)
     {
+        if let Some((version, knobs)) = params.pipeline.pending(seen) {
+            seen = version;
+            let result = apply_knobs(encoder, &mut clock, &mut applied, knobs);
+            params.pipeline.complete(version, result);
+        }
         if !session.is_armed() {
             // Nothing is captured or written until the dock accepts video; the session thread
             // owns the handshake and its timeouts.
@@ -125,7 +136,7 @@ fn video_loop(
         }
         if session.generation() != generation {
             generation = session.generation();
-            encoder.request_keyframe();
+            force_keyframe(encoder, &mut clock);
         }
         let frame = match capture.next_frame() {
             Ok(frame) => frame,
@@ -137,12 +148,15 @@ fn video_loop(
                 continue;
             }
         };
+        if clock.next_frame() {
+            encoder.request_keyframe();
+        }
         let messages = match encoder.encode(&frame) {
             Ok(messages) => messages,
             Err(e) => {
                 report.encode_errors += 1;
                 warn!(error = %e, "encode failed, dropping frame");
-                encoder.request_keyframe();
+                force_keyframe(encoder, &mut clock);
                 fail(&mut consecutive, e.to_string())?;
                 continue;
             }
@@ -152,7 +166,7 @@ fn video_loop(
         for message in &messages {
             if !session.is_armed() {
                 // Lost mid-frame: the rest of this frame would be dropped by the dock.
-                encoder.request_keyframe();
+                force_keyframe(encoder, &mut clock);
                 frame_ok = false;
                 break;
             }
@@ -180,7 +194,7 @@ fn video_loop(
                         write_failures = 0;
                     }
                     // The panel may now lack a reference frame; restart from a keyframe.
-                    encoder.request_keyframe();
+                    force_keyframe(encoder, &mut clock);
                     fail(&mut consecutive, e.to_string())?;
                     frame_ok = false;
                     break;
@@ -205,11 +219,39 @@ fn video_loop(
     Ok(())
 }
 
+/// Asks for a keyframe on the next frame and restarts the keyframe count.
+fn force_keyframe(encoder: &mut dyn Encoder, clock: &mut KeyframeClock) {
+    encoder.request_keyframe();
+    clock.keyframe_forced();
+}
+
+/// Applies the published knobs to the encoder and the keyframe clock. On an encoder error
+/// nothing changes.
+fn apply_knobs(
+    encoder: &mut dyn Encoder,
+    clock: &mut KeyframeClock,
+    current: &mut PipelineKnobs,
+    new: PipelineKnobs,
+) -> Result<(), String> {
+    if new.bitrate_kbps != current.bitrate_kbps || new.vbv_buffer_ms != current.vbv_buffer_ms {
+        encoder
+            .set_rate(RateSettings {
+                bitrate_kbps: new.bitrate_kbps,
+                vbv_buffer_ms: new.vbv_buffer_ms,
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    clock.set_interval(new.keyframe_interval);
+    *current = new;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::adapters::encode::prerecorded::PrerecordedEncoder;
     use crate::adapters::transport::hidraw::HidrawHandle;
+    use crate::app::types::PipelineState;
     use crate::core::session::{SessionError, SessionSettings};
     use crate::ports::capture::{CaptureError, Frame, PixelFormat};
     use crate::ports::encode::EncoderSettings;
@@ -278,6 +320,14 @@ mod tests {
                 .without_handshake(),
             max_frames: Some(max_frames),
             max_consecutive_errors: 5,
+            pipeline: PipelineState::new(
+                PipelineKnobs {
+                    bitrate_kbps: 1000,
+                    vbv_buffer_ms: 200,
+                    keyframe_interval: 2,
+                },
+                true,
+            ),
         }
     }
 

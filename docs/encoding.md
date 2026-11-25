@@ -19,6 +19,8 @@ A message is written to MI_01 through `protocol::framing::MessageBuilder::video`
 |---|---|
 | `name()` | Short identifier for logs |
 | `encode(&Frame)` | Encodes one captured frame and returns zero or more messages in send order, normally exactly one |
+| `set_rate(RateSettings)` | Changes the target bit rate and the VBV buffer of the running encoder without a rebuild and without a keyframe. The default refuses with `EncodeError::Unsupported` |
+| `supports_live_rate()` | True when `set_rate` takes effect on the running encoder. The default is false |
 | `request_keyframe()` | Makes the next output a keyframe bundle. The daemon calls it after a failed write so the panel can resynchronize |
 
 `EncoderSettings` carries the validated `DisplayGeometry`, the frame rate, the keyframe interval and the target bit rate. `EncoderSettings::from_config` fills them from the config; a `capture.fps` of 0 encodes at 25 fps. `create_encoder` builds a boxed encoder from an `EncoderKind`.
@@ -30,9 +32,10 @@ Errors are the typed `EncodeError` enum: unavailable encoder, setup failure, bac
 `adapters::encode::ffmpeg::FfmpegEncoder` drives libx264 through the `ffmpeg-next` crate.
 
 - Input: BGRA or RGBA frames (4 bytes per pixel, any stride). Rows are copied into an AVFrame and converted to yuv420p with swscale (bilinear), scaling to the target size. The scaler is rebuilt if the source size or format changes.
-- Encoder options: `preset` from `encode.preset`, `tune=zerolatency` when `encode.tune_zerolatency` is true, `profile=baseline`, the codec option `forced-idr=1`, and the x264 parameters `bframes=0`, `slices=1`, `sliced-threads=0`, `threads=1`, `aud=0`, `repeat-headers=1`, `keyint` and `min-keyint` equal to `encode.keyframe_interval`, `scenecut=0`, and, when `encode.vbv_buffer_ms` is above 0, `vbv-maxrate` equal to `encode.bitrate_kbps` and `vbv-bufsize` equal to `bitrate_kbps * vbv_buffer_ms / 1000` (both in kilobits). One slice per frame keeps every inter-frame a single NAL unit. One thread avoids the multi-frame delay of frame threading.
+- Encoder options: `preset` from `encode.preset`, `tune=zerolatency` when `encode.tune_zerolatency` is true, `profile=baseline`, the codec option `forced-idr=1`, and the x264 parameters `bframes=0`, `slices=1`, `sliced-threads=0`, `threads=1`, `aud=0`, `repeat-headers=1`, `keyint` and `min-keyint` at 3600, above every accepted keyframe interval, so keyframes come only from `request_keyframe`, `scenecut=0`, and, when `encode.vbv_buffer_ms` is above 0, `vbv-maxrate` equal to `encode.bitrate_kbps` and `vbv-bufsize` equal to `bitrate_kbps * vbv_buffer_ms / 1000` (both in kilobits). One slice per frame keeps every inter-frame a single NAL unit. One thread avoids the multi-frame delay of frame threading.
 - Bit rate comes from `encode.bitrate_kbps`; the time base is 1/fps.
 - The VBV cap bounds the size of any one frame, keyframes included, which bounds the number of 4080 byte reports a frame needs.
+- Live rate change: `set_rate` writes the codec context's bit rate, maximum rate and VBV buffer size, which libavcodec's libx264 wrapper applies to the running encoder between frames. Whether the linked libavcodec does so is measured once per process (noise frames at 2000 kbit/s, then 200 kbit/s; the change counts as applied when the mean frame size drops below 60 percent), and `supports_live_rate` reports the result. The bit rate, maximum rate and VBV buffer are also set on the codec context at startup so they match the `x264-params`.
 - `request_keyframe` marks the next frame as an I picture; `forced-idr` makes it an IDR.
 
 Build requirements: the libav development files (`libavcodec-dev`, `libavformat-dev`, `libavutil-dev`, `libswscale-dev`, `libavdevice-dev`), `libx264-dev`, `clang` and `pkg-config` on Debian and Ubuntu.
@@ -70,7 +73,7 @@ The picture is average bit rate controlled at `encode.bitrate_kbps`. When the bi
 
 - `bitrate_kbps` sets the average size: about `bitrate_kbps * 1000 / 8 / fps` bytes per frame (20000 bytes per frame at 4000 kbit/s and 25 fps). Raise it when fast motion looks blocky.
 - `vbv_buffer_ms` bounds the burst size. A keyframe holds a whole picture, so without a cap it is the largest frame; with the cap it is limited to roughly the buffer size. A smaller buffer lowers the keyframe size and the number of reports per frame but lowers quality on keyframes and on sudden motion.
-- `keyframe_interval` sets how often a keyframe is sent; a larger value means fewer keyframe bursts and slower recovery after a lost frame. A keyframe is also sent after a failed write and after the session is armed again.
+- `keyframe_interval` sets how often a keyframe is sent. `core::keyframe::KeyframeClock` counts frames and the daemon and `bench` call `request_keyframe` on the first frame and then every interval, so the interval can change while the encoder runs (`ctl set keyframe-interval`, see [control.md](control.md)); a larger value means fewer keyframe bursts and slower recovery after a lost frame. A keyframe is also sent after a failed write and after the session is armed again.
 - `preset` trades CPU for quality at one bit rate. `tune_zerolatency` removes lookahead and frame delay and should stay on.
 
 Encoding is single threaded, one slice per frame, no B-frames, so one frame goes out as one message with no reordering delay. The video loop writes every report of a message back to back; capture is paced against fixed deadlines by the backend. A static screen produces very small inter-frames.

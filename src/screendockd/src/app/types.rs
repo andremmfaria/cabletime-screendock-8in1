@@ -1,6 +1,7 @@
 //! Types of the application layer: daemon parameters, report and errors.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use thiserror::Error;
@@ -51,6 +52,8 @@ pub struct DaemonParams {
     /// Stop after this many frames were sent (tests and dry runs); `None` runs until stopped.
     pub max_frames: Option<u64>,
     pub max_consecutive_errors: u32,
+    /// Settings the supervisor changes while the loop runs.
+    pub pipeline: Arc<PipelineState>,
 }
 
 /// Counters from a finished run.
@@ -100,3 +103,39 @@ pub struct Supervisor {
     pub(super) extra: BTreeMap<String, String>,
     pub(super) changes_applied: u64,
 }
+
+/// The encoder settings the supervisor can change while the video loop runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PipelineKnobs {
+    pub bitrate_kbps: u32,
+    pub vbv_buffer_ms: u32,
+    pub keyframe_interval: u32,
+}
+
+#[derive(Debug)]
+pub(super) struct PipelineShared {
+    pub(super) published: PipelineKnobs,
+    pub(super) applied: PipelineKnobs,
+    pub(super) version: u64,
+    pub(super) applied_version: u64,
+    pub(super) failure: Option<(u64, String)>,
+}
+
+/// Hand-over between the supervisor and the video loop. The supervisor publishes new knobs
+/// and waits; the loop applies them at a frame boundary and reports the result.
+#[derive(Debug)]
+pub struct PipelineState {
+    pub(super) shared: Mutex<PipelineShared>,
+    pub(super) done: Condvar,
+    pub(super) live_rate: bool,
+}
+
+/// The pipeline handle of a running daemon: bit rate and keyframe interval changes go through
+/// [`PipelineState`] to the video loop.
+#[derive(Debug, Clone)]
+pub struct EncoderPipeline {
+    pub(super) state: Arc<PipelineState>,
+}
+
+/// Longest the supervisor waits for the video loop to apply a change.
+pub(super) const APPLY_TIMEOUT: Duration = Duration::from_secs(3);

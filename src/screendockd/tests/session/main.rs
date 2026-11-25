@@ -1,1 +1,2 @@
 mod dock;
+mod reconfig;

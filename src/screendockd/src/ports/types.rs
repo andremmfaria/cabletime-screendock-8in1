@@ -106,6 +106,9 @@ pub enum EncodeError {
     /// The encoder library rejected a frame or failed while encoding.
     #[error("encoding failed: {0}")]
     Backend(String),
+    /// The encoder cannot do what was asked while it runs.
+    #[error("{0} is not supported by this encoder")]
+    Unsupported(&'static str),
     /// The encoder output did not split into dock messages.
     #[error("encoder output is not valid Annex-B: {0}")]
     AnnexB(#[from] AnnexBError),
@@ -139,6 +142,15 @@ pub struct EncoderSettings {
     pub vbv_buffer_ms: u32,
 }
 
+/// The rate settings an encoder can change while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateSettings {
+    /// Target bit rate in kilobits per second; also the VBV maximum rate.
+    pub bitrate_kbps: u32,
+    /// VBV buffer in milliseconds of `bitrate_kbps`; 0 disables the cap.
+    pub vbv_buffer_ms: u32,
+}
+
 /// Converts frames to dock video messages.
 pub trait Encoder {
     /// Short identifier for logs.
@@ -151,6 +163,18 @@ pub trait Encoder {
     /// Makes the next output a keyframe bundle, used after a failed write so the panel can
     /// resynchronize.
     fn request_keyframe(&mut self);
+
+    /// Changes the target rate and the VBV buffer without rebuilding the encoder. The
+    /// stream stays decodable: no keyframe is needed and no state is lost. Encoders that
+    /// cannot do this keep the default, which refuses.
+    fn set_rate(&mut self, _rate: RateSettings) -> Result<(), EncodeError> {
+        Err(EncodeError::Unsupported("changing the rate while running"))
+    }
+
+    /// True when [`set_rate`](Encoder::set_rate) takes effect on the running encoder.
+    fn supports_live_rate(&self) -> bool {
+        false
+    }
 }
 
 /// Errors from opening, writing to or reading from a dock transport (a hidraw node).

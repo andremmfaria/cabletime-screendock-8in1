@@ -37,6 +37,7 @@ pub(super) fn run(args: BenchArgs, config: &Config) -> Result<()> {
     let report = run_bench(
         capture.as_mut(),
         encoder.as_mut(),
+        config.encode.keyframe_interval,
         Duration::from_secs(args.duration_secs),
         &stop,
     )

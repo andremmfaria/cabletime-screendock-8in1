@@ -10,8 +10,9 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use screendockd::adapters::encode::ffmpeg::FfmpegEncoder;
+use screendockd::core::keyframe::KeyframeClock;
 use screendockd::ports::capture::{Frame, PixelFormat};
-use screendockd::ports::encode::{Encoder, EncoderSettings, VideoMessage};
+use screendockd::ports::encode::{Encoder, EncoderSettings, RateSettings, VideoMessage};
 use screendockd::protocol::annexb::split_nals;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
 
@@ -50,7 +51,11 @@ fn synthetic_frame(n: usize) -> Frame {
 
 fn encode_sequence(encoder: &mut FfmpegEncoder) -> Vec<VideoMessage> {
     let mut out = Vec::new();
+    let mut clock = KeyframeClock::new(KEYFRAME_INTERVAL);
     for n in 0..FRAMES {
+        if clock.next_frame() {
+            encoder.request_keyframe();
+        }
         out.extend(encoder.encode(&synthetic_frame(n)).expect("encode"));
     }
     out
@@ -170,4 +175,92 @@ fn ffmpeg_cli_decodes_portrait_output() {
     let mut encoder = FfmpegEncoder::new(settings(240, 320, Orientation::Portrait)).unwrap();
     let messages = encode_sequence(&mut encoder);
     assert_eq!(decode_with_cli(&messages, 240, 320), FRAMES);
+}
+
+/// Full-entropy frames, so the encoder's output size follows its rate target.
+fn noisy_frame(n: usize) -> Frame {
+    let mut seed = 0x9E37_79B9_7F4A_7C15_u64 ^ (n as u64 + 1).wrapping_mul(0xD1B5_4A32_D192_ED03);
+    let stride = SRC_W as usize * 4;
+    let mut data = vec![0u8; stride * SRC_H as usize];
+    for byte in &mut data {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        *byte = (seed >> 24) as u8;
+    }
+    Frame::new(SRC_W, SRC_H, PixelFormat::Bgra8888, stride, data).unwrap()
+}
+
+fn mean_size(messages: &[VideoMessage]) -> f64 {
+    let total: usize = messages.iter().map(|m| m.as_bytes().len()).sum();
+    total as f64 / messages.len() as f64
+}
+
+#[test]
+fn live_bitrate_change_shrinks_frames_and_the_stream_still_decodes() {
+    let mut encoder = FfmpegEncoder::new(settings(320, 240, Orientation::Landscape)).unwrap();
+    if !encoder.supports_live_rate() {
+        eprintln!("skipping: this libavcodec does not apply a live rate change");
+        return;
+    }
+    let mut clock = KeyframeClock::new(KEYFRAME_INTERVAL);
+    let mut all = Vec::new();
+    let mut run = |encoder: &mut FfmpegEncoder, from: usize, count: usize| {
+        let mut part = Vec::new();
+        for n in from..from + count {
+            if clock.next_frame() {
+                encoder.request_keyframe();
+            }
+            part.extend(encoder.encode(&noisy_frame(n)).unwrap());
+        }
+        part
+    };
+    let before = run(&mut encoder, 0, 30);
+    encoder
+        .set_rate(RateSettings {
+            bitrate_kbps: 300,
+            vbv_buffer_ms: 200,
+        })
+        .unwrap();
+    let after = run(&mut encoder, 30, 50);
+    let settled = &after[after.len() - 25..];
+    let reference = &before[before.len() - 20..];
+    assert!(
+        mean_size(settled) < mean_size(reference) * 0.5,
+        "frames did not shrink: {} then {}",
+        mean_size(reference),
+        mean_size(settled)
+    );
+    all.extend(before);
+    all.extend(after);
+    assert_eq!(all.len(), 80, "one message per frame through the change");
+    if ffmpeg_available() {
+        assert_eq!(decode_with_cli(&all, 320, 240), 80);
+    }
+}
+
+#[test]
+fn keyframe_clock_changes_the_idr_spacing_while_the_encoder_runs() {
+    let mut encoder = FfmpegEncoder::new(settings(320, 240, Orientation::Landscape)).unwrap();
+    let mut clock = KeyframeClock::new(10);
+    let mut keys = Vec::new();
+    let mut all = Vec::new();
+    for n in 0..60 {
+        if n == 40 {
+            clock.set_interval(5);
+        }
+        if clock.next_frame() {
+            encoder.request_keyframe();
+        }
+        for message in encoder.encode(&synthetic_frame(n)).unwrap() {
+            if message.is_keyframe() {
+                keys.push(n);
+            }
+            all.push(message);
+        }
+    }
+    assert_eq!(keys, [0, 10, 20, 30, 40, 45, 50, 55]);
+    if ffmpeg_available() {
+        assert_eq!(decode_with_cli(&all, 320, 240), 60);
+    }
 }

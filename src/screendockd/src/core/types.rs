@@ -31,6 +31,14 @@ pub(super) const POLL_SLICE: Duration = Duration::from_millis(50);
 /// A dock heartbeat counts as proof of life for this long.
 pub(super) const DOCK_ALIVE_WINDOW: Duration = Duration::from_secs(3);
 
+/// Decides which frames must be keyframes: the first one, then one every `interval` frames.
+/// The encoder only produces a keyframe when asked, so the interval can change while it runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyframeClock {
+    pub(super) interval: u32,
+    pub(super) until_key: u32,
+}
+
 /// How the monitor is provided on X11.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum X11Tier {

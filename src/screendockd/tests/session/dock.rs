@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
-use screendockd::app::daemon::{run, DaemonParams, DaemonReport};
+use screendockd::app::daemon::{run, DaemonParams, DaemonReport, PipelineKnobs};
+use screendockd::app::pipeline::PipelineState;
 use screendockd::core::session::SessionSettings;
 use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::ports::encode::EncoderSettings;
@@ -59,6 +60,14 @@ fn params(max_frames: Option<u64>) -> DaemonParams {
         session,
         max_frames,
         max_consecutive_errors: 50,
+        pipeline: PipelineState::new(
+            PipelineKnobs {
+                bitrate_kbps: 1000,
+                vbv_buffer_ms: 200,
+                keyframe_interval: 2,
+            },
+            true,
+        ),
     }
 }
 

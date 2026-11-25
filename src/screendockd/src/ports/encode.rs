@@ -3,7 +3,9 @@
 //!
 //! Implementations live in `adapters::encode`.
 
-pub use super::types::{EncodeError, Encoder, EncoderSettings, VideoMessage, DEFAULT_FPS};
+pub use super::types::{
+    EncodeError, Encoder, EncoderSettings, RateSettings, VideoMessage, DEFAULT_FPS,
+};
 use crate::protocol::annexb::contains_idr;
 use crate::protocol::display::DisplayGeometry;
 use crate::utils::config::Config;

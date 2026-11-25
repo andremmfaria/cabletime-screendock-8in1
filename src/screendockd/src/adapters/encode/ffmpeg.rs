@@ -7,6 +7,8 @@
 //! PPS repeated on every keyframe, forced IDR keyframes. The packets come out as Annex-B and go
 //! through [`messages_from_packet`](crate::adapters::encode::messages_from_packet).
 
+use std::sync::OnceLock;
+
 use ffmpeg_next as ffmpeg;
 
 use ffmpeg::format::Pixel;
@@ -14,10 +16,10 @@ use ffmpeg::software::scaling::{Context as Scaler, Flags};
 use ffmpeg::{codec, encoder, frame, picture, Dictionary, Packet};
 
 pub use super::types::FfmpegEncoder;
-use super::types::SourceScaler;
+use super::types::{SourceScaler, KEYFRAME_CEILING};
 use crate::adapters::encode::messages_from_packet;
 use crate::ports::capture::{Frame, PixelFormat};
-use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, VideoMessage};
+use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, RateSettings, VideoMessage};
 
 fn setup_err(e: ffmpeg::Error) -> EncodeError {
     EncodeError::Setup(e.to_string())
@@ -34,14 +36,35 @@ fn pixel_for(format: PixelFormat) -> Pixel {
     }
 }
 
+/// Writes the VBV fields of the codec context. libavcodec's libx264 wrapper compares them with
+/// its own values between frames and reconfigures the encoder when they differ, so they must
+/// follow the `vbv-maxrate` and `vbv-bufsize` x264 parameters.
+fn set_vbv(context: *mut ffmpeg::ffi::AVCodecContext, settings: &EncoderSettings) {
+    let (max_rate, buffer) = if settings.vbv_buffer_ms == 0 {
+        (0, 0)
+    } else {
+        let kbit =
+            (u64::from(settings.bitrate_kbps) * u64::from(settings.vbv_buffer_ms) / 1000).max(1);
+        (
+            i64::from(settings.bitrate_kbps) * 1000,
+            i32::try_from(kbit * 1000).unwrap_or(i32::MAX),
+        )
+    };
+    // SAFETY: the caller passes the live context of an encoder it holds mutably, and the two
+    // fields are plain integers read by the wrapper between frames on the same thread.
+    unsafe {
+        (*context).rc_max_rate = max_rate;
+        (*context).rc_buffer_size = buffer;
+    }
+}
+
 /// The `x264-params` string for the settings. The VBV cap (`vbv-maxrate` equal to the target
 /// rate, `vbv-bufsize` of `vbv_buffer_ms` at that rate, both in kilobits) bounds every frame,
 /// so a keyframe cannot grow far beyond the buffer.
 fn x264_params(settings: &EncoderSettings) -> String {
     let mut params = format!(
         "bframes=0:slices=1:sliced-threads=0:threads=1:aud=0:repeat-headers=1:\
-         keyint={0}:min-keyint={0}:scenecut=0",
-        settings.keyframe_interval
+         keyint={KEYFRAME_CEILING}:min-keyint={KEYFRAME_CEILING}:scenecut=0"
     );
     if settings.vbv_buffer_ms > 0 {
         let bufsize =
@@ -74,9 +97,11 @@ impl FfmpegEncoder {
         video.set_format(Pixel::YUV420P);
         video.set_time_base((1, fps));
         video.set_frame_rate(Some((fps, 1)));
-        video.set_gop(settings.keyframe_interval);
+        video.set_gop(KEYFRAME_CEILING);
         video.set_max_b_frames(0);
         video.set_bit_rate(settings.bitrate_kbps as usize * 1000);
+        // SAFETY: the context is owned by `video` and not shared yet.
+        set_vbv(unsafe { video.as_mut_ptr() }, &settings);
 
         let mut options = Dictionary::new();
         options.set("preset", settings.preset.as_str());
@@ -187,6 +212,86 @@ impl Encoder for FfmpegEncoder {
     fn request_keyframe(&mut self) {
         self.force_keyframe = true;
     }
+
+    fn set_rate(&mut self, rate: RateSettings) -> Result<(), EncodeError> {
+        if rate.bitrate_kbps == 0 {
+            return Err(EncodeError::Setup("bit rate must be above zero".into()));
+        }
+        self.settings.bitrate_kbps = rate.bitrate_kbps;
+        self.settings.vbv_buffer_ms = rate.vbv_buffer_ms;
+        self.encoder.set_bit_rate(rate.bitrate_kbps as usize * 1000);
+        // SAFETY: the context belongs to `self.encoder`, borrowed mutably here.
+        set_vbv(unsafe { self.encoder.as_mut_ptr() }, &self.settings);
+        Ok(())
+    }
+
+    fn supports_live_rate(&self) -> bool {
+        live_rate_supported()
+    }
+}
+
+/// Whether the linked libavcodec applies a bit rate change to a running libx264 encoder. It is
+/// measured once per process: noise frames are encoded at a high rate, the rate is lowered, and
+/// the change counts as applied when the frames get clearly smaller.
+fn live_rate_supported() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| probe_live_rate().unwrap_or(false))
+}
+
+fn probe_live_rate() -> Result<bool, EncodeError> {
+    use crate::protocol::display::{DisplayGeometry, Orientation};
+    use crate::utils::config::X264Preset;
+
+    const WIDTH: u32 = 320;
+    const HEIGHT: u32 = 240;
+    let geometry = DisplayGeometry::new(WIDTH, HEIGHT, Orientation::Landscape)
+        .map_err(|e| EncodeError::Setup(e.to_string()))?;
+    let mut encoder = FfmpegEncoder::new(EncoderSettings {
+        geometry,
+        fps: 25,
+        keyframe_interval: 25,
+        bitrate_kbps: 2000,
+        preset: X264Preset::Ultrafast,
+        zerolatency: true,
+        vbv_buffer_ms: 100,
+    })?;
+    let mut seed = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut mean_bytes = |encoder: &mut FfmpegEncoder, skip: usize, count: usize| {
+        let mut total = 0usize;
+        for n in 0..skip + count {
+            let mut data = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
+            for byte in &mut data {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                *byte = (seed >> 24) as u8;
+            }
+            let frame = Frame::new(
+                WIDTH,
+                HEIGHT,
+                PixelFormat::Bgra8888,
+                (WIDTH * 4) as usize,
+                data,
+            )
+            .map_err(|e| EncodeError::Setup(e.to_string()))?;
+            let bytes: usize = encoder
+                .encode(&frame)?
+                .iter()
+                .map(|m| m.as_bytes().len())
+                .sum();
+            if n >= skip {
+                total += bytes;
+            }
+        }
+        Ok::<f64, EncodeError>(total as f64 / count as f64)
+    };
+    let before = mean_bytes(&mut encoder, 8, 20)?;
+    encoder.set_rate(RateSettings {
+        bitrate_kbps: 200,
+        vbv_buffer_ms: 100,
+    })?;
+    let after = mean_bytes(&mut encoder, 10, 20)?;
+    Ok(after < before * 0.6)
 }
 
 #[cfg(test)]
@@ -214,7 +319,7 @@ mod tests {
             params.contains("vbv-maxrate=4000:vbv-bufsize=400"),
             "{params}"
         );
-        assert!(params.contains("keyint=50:min-keyint=50"));
+        assert!(params.contains("keyint=3600:min-keyint=3600"));
         assert!(!params.contains("forced-idr"));
         assert!(!x264_params(&settings(0)).contains("vbv"));
     }

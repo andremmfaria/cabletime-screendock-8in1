@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub use super::types::{BenchError, BenchReport, CpuTimes, SizeStats};
+use crate::core::keyframe::KeyframeClock;
 use crate::ports::capture::CaptureBackend;
 use crate::ports::encode::Encoder;
 
@@ -145,9 +146,11 @@ impl fmt::Display for BenchReport {
 pub fn run_bench(
     capture: &mut dyn CaptureBackend,
     encoder: &mut dyn Encoder,
+    keyframe_interval: u32,
     duration: Duration,
     stop: &AtomicBool,
 ) -> Result<BenchReport, BenchError> {
+    let mut clock = KeyframeClock::new(keyframe_interval);
     let cpu_start = process_cpu_times()?;
     let start = Instant::now();
     let mut report = BenchReport {
@@ -167,6 +170,9 @@ pub fn run_bench(
         let frame = capture.next_frame()?;
         report.capture_wall += t.elapsed();
 
+        if clock.next_frame() {
+            encoder.request_keyframe();
+        }
         let t = Instant::now();
         let messages = encoder.encode(&frame)?;
         report.encode_wall += t.elapsed();
@@ -226,8 +232,14 @@ mod tests {
         )
         .unwrap();
         let stop = AtomicBool::new(false);
-        let report =
-            run_bench(&mut Paced, &mut encoder, Duration::from_millis(200), &stop).unwrap();
+        let report = run_bench(
+            &mut Paced,
+            &mut encoder,
+            2,
+            Duration::from_millis(200),
+            &stop,
+        )
+        .unwrap();
         assert!(report.frames >= 10, "{report}");
         assert_eq!(report.messages, report.frames);
         assert!(report.encoded_bytes >= 6 * report.frames);
