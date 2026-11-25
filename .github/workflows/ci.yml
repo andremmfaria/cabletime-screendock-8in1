@@ -34,7 +34,7 @@ jobs:
         with:
           workspaces: src/screendockd
 
-      # Xvfb backs the X11 capture integration tests (tests/capture_x11.rs).
+      # Xvfb backs the X11 capture integration tests (tests/capture/).
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y xvfb
 

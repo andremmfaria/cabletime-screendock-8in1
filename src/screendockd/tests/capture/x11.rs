@@ -4,11 +4,9 @@
 //! Skips (passes with a note on stderr) when `Xvfb` is not on `PATH`. Set
 //! `SCREENDOCK_REQUIRE_XVFB=1` to make a missing Xvfb a failure; CI does this.
 
-mod common;
-
 use std::process::Command;
 
-use common::{require_xvfb, Painter, HEIGHT, WIDTH};
+use crate::support::{require_xvfb, Painter, HEIGHT, WIDTH};
 use screendockd::adapters::capture::x11_shm::X11ShmCapture;
 use screendockd::ports::capture::{CaptureBackend, PixelFormat};
 

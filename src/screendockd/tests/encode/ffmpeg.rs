@@ -5,7 +5,6 @@
 //! Only built with `--features encode-ffmpeg`. Skips (passes with a note on stderr) when the
 //! `ffmpeg` binary is missing; `SCREENDOCK_REQUIRE_FFMPEG=1` turns that into a failure, and CI
 //! sets it.
-#![cfg(feature = "encode-ffmpeg")]
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -27,7 +26,7 @@ fn settings(width: u32, height: u32, orientation: Orientation) -> EncoderSetting
         fps: 25,
         keyframe_interval: KEYFRAME_INTERVAL,
         bitrate_kbps: 1500,
-        preset: screendockd::config::X264Preset::Ultrafast,
+        preset: screendockd::utils::config::X264Preset::Ultrafast,
         zerolatency: true,
         vbv_buffer_ms: 200,
     }

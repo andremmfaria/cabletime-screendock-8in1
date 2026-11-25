@@ -1,6 +1,6 @@
 # Daemon
 
-`screendockd run` is the daemon: it opens the dock's two hidraw nodes, runs the MI_00 session (heartbeat, reader and handshake), and captures, encodes, frames and writes video to MI_01 once the session allows it. Source: `src/screendockd/src/daemon.rs` and the `run` subcommand in `src/main.rs`.
+`screendockd run` is the daemon: it opens the dock's two hidraw nodes, runs the MI_00 session (heartbeat, reader and handshake), and captures, encodes, frames and writes video to MI_01 once the session allows it. Source: `src/screendockd/src/app/daemon.rs` and the `run` subcommand in `src/cli/run.rs`.
 
 Status: requires on-device validation. The loop is tested against regular files standing in for the nodes, a simulated dock, a real Xvfb display and the prerecorded test encoder. See [hardware-validation.md](hardware-validation.md) for the on-device procedure.
 
@@ -58,5 +58,5 @@ The same geometry sets the libx264 output size (the capture is scaled to it by t
 
 ## Tests
 
-- Unit tests in `app/daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and header size, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles. Session behavior is tested in `session.rs` and `tests/session_dock.rs` against a simulated dock: message bytes, handshake order, bounded waits, loss and redo, and that no video precedes the sink.
-- `tests/daemon_e2e.rs` runs the real binary against Xvfb with the prerecorded encoder and files for the nodes: it checks the video messages byte for byte against the source stream, the heartbeat, a clean exit on SIGTERM and on SIGINT, and a nonzero exit with no video written when a node cannot be opened.
+- Unit tests in `app/daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and header size, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles. Session behavior is tested in `session.rs` and `tests/session/dock.rs` against a simulated dock: message bytes, handshake order, bounded waits, loss and redo, and that no video precedes the sink.
+- `tests/e2e/daemon_xvfb.rs` runs the real binary against Xvfb with the prerecorded encoder and files for the nodes: it checks the video messages byte for byte against the source stream, the heartbeat, a clean exit on SIGTERM and on SIGINT, and a nonzero exit with no video written when a node cannot be opened.

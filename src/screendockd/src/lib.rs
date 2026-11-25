@@ -8,12 +8,12 @@
 
 pub mod adapters;
 pub mod app;
-pub mod config;
+pub mod cli;
 pub mod core;
 pub mod ports;
 pub mod protocol;
-pub mod telemetry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 #[cfg(feature = "tools")]
 pub mod tools;
+pub mod utils;

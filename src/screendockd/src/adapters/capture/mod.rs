@@ -9,8 +9,8 @@
 pub mod wayland_portal;
 pub mod x11_shm;
 
-use crate::config::{CaptureBackendChoice, Config};
 use crate::ports::capture::{CaptureBackend, CaptureError};
+use crate::utils::config::{CaptureBackendChoice, Config};
 
 /// Kind of graphical session the daemon runs in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

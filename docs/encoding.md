@@ -43,7 +43,7 @@ cargo build --release --features encode-ffmpeg
 
 Without the feature, the `ffmpeg` encoder is not part of the build and `create_encoder` returns `EncodeError::Unavailable`. Everything else builds and tests without libav. The packages built by CI are built with the feature.
 
-Verification: `tests/encode_ffmpeg.rs` encodes a 30 frame synthetic sequence from a 640x480 BGRA source with a padded stride and checks the message shape (SPS then PPS then IDR in keyframes, a single NAL in every inter-frame, one message per frame), the SPS profile (66 with constraint_set1) and a keyframe request. It then decodes the output with the `ffmpeg` command line tool and checks the decoded frame count and sizes, for a landscape (320x240) and a portrait (240x320) target. CI runs these in the `encode-ffmpeg` job. The feature does not compile on a host without the libav development files.
+Verification: `tests/encode/ffmpeg.rs` encodes a 30 frame synthetic sequence from a 640x480 BGRA source with a padded stride and checks the message shape (SPS then PPS then IDR in keyframes, a single NAL in every inter-frame, one message per frame), the SPS profile (66 with constraint_set1) and a keyframe request. It then decodes the output with the `ffmpeg` command line tool and checks the decoded frame count and sizes, for a landscape (320x240) and a portrait (240x320) target. CI runs these in the `encode-ffmpeg` job. The feature does not compile on a host without the libav development files.
 
 ## Prerecorded test encoder
 

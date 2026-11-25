@@ -1,6 +1,6 @@
 # Architecture
 
-`screendockd` is one Rust crate (`src/screendockd`) with a library and a binary. The library holds every module; the binary (`src/main.rs`) is the command line entry point. The daemon is one process: a video loop for capture, encode and framing on the calling thread, and a dock session (heartbeat, MI_00 reader and handshake controller threads) on MI_00, all talking to the dock through hidraw.
+`screendockd` is one Rust crate (`src/screendockd`) with a library and a binary. The library holds every module; the binary (`src/main.rs`) only calls `cli::run`, which holds the command line. The daemon is one process: a video loop for capture, encode and framing on the calling thread, and a dock session (heartbeat, MI_00 reader and handshake controller threads) on MI_00, all talking to the dock through hidraw.
 
 ## Data flow
 
@@ -33,8 +33,9 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `testing::fake_dock` | A simulated dock over Unix datagram socket pairs, used by session, daemon and validation tests. Not used by the daemon | Implemented, loopback tested. Requires on-device validation |
 | `protocol::annexb` | Splits an Annex-B H.264 stream into dock messages (keyframe bundle, single inter-frame NALs) | Implemented, unit tested |
 | `tools::validation` | Replay timing and heartbeat isolation routines used by the CLI. They run the dock session first when video is sent with an MI_00 handle | Implemented, loopback tested. Requires on-device validation |
-| `config` | Loads the TOML config through a four step path resolution | Implemented |
-| `telemetry::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
+| `cli` | Argument definitions (`args`), shared helpers (`support`) and one handler per subcommand (`discover`, `capture`, `run`, and with feature `tools` `replay`, `isolate`, `bench`). It is the composition root: it builds the adapters and passes them to the app, the core and the tools | Implemented |
+| `utils::config` | Loads the TOML config through a four step path resolution | Implemented |
+| `utils::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
 | `ports::encode` | `Encoder` trait, `VideoMessage`, `EncoderSettings` and `EncodeError`. See [encoding.md](encoding.md) | Implemented |
 | `adapters::encode` | Message policy (`messages_from_packet`), `create_encoder`, libx264 encoder (`adapters::encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`adapters::encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
@@ -55,17 +56,33 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 
 ## Layering rules
 
+Layers, lowest first: `utils`, `protocol`, `ports`, `core`, `adapters`, `app`, `cli`. `utils` is the cross-cutting base layer: configuration loading and logging setup only, no domain logic, and it imports nothing else from the crate. `tools` and `testing` are satellites.
+
+| Layer | May import | Must not import |
+|---|---|---|
+| `utils` | std and external crates | any crate module |
+| `protocol` | `utils::config` (only `protocol::display`) | ports, core, adapters, app, cli, tools, testing |
+| `ports` | protocol, utils | core, adapters, app, cli, tools, testing |
+| `core` | protocol, ports, utils | adapters, app, cli, tools, testing (outside unit tests) |
+| `adapters` | ports, protocol, utils | core, app, cli |
+| `app` | core, ports, protocol, utils | adapters, cli (outside unit tests) |
+| `tools` | core, ports, protocol, utils | adapters (outside unit tests) |
+| `testing` | adapters, ports, protocol | core, app, cli |
+| `cli` | everything | nothing |
+
+`mod.rs` files declare submodules and use no glob re-exports; only `core::session` re-exports its public items from its submodules.
+
 - Ports are the traits and data types the daemon depends on (`ports::capture::CaptureBackend`, `ports::encode::Encoder`, `ports::transport::DockTransport`). The implementations live in `adapters` and are chosen once at startup by `adapters::capture::create_backend` and `adapters::encode::create_encoder`, so the daemon never names a concrete backend or encoder.
 - Mechanism and policy are separate. `adapters::transport::hidraw` moves framed buffers and checks only that each chunk's Report ID matches the channel the handle was opened for. `protocol::framing`, `protocol::heartbeat` and `protocol::messages` define what messages mean and never touch a file descriptor.
 - Domain values are newtypes: the two node paths cannot be swapped, a pixel width cannot be passed where a height is expected, and Report IDs are a closed enum.
-- Library modules return typed `thiserror` enums. `main.rs` is the application boundary and uses `anyhow` with context, so failures print a readable chain and exit nonzero.
+- Library modules return typed `thiserror` enums. `cli` is the application boundary and uses `anyhow` with context, so failures print a readable chain and exit nonzero.
 - Reads are parsed at the I/O boundary: `HidrawHandle::read_message` returns a `ParsedMessage`, never raw buffers.
 - `HidrawHandle` owns a `std::fs::File`, so the descriptor closes on drop. No method exposes the raw fd.
 
 ## Command line
 
-The binary provides `discover`, `replay`, `isolate`, `capture`, `run` and `bench`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). `run` is the daemon, see [daemon.md](daemon.md). `bench` measures capture plus encode CPU time, see [encoding.md](encoding.md#cpu-measurement).
+The command line lives in `src/screendockd/src/cli/`. The binary provides `discover`, `replay`, `isolate`, `capture`, `run` and `bench`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). `run` is the daemon, see [daemon.md](daemon.md). `bench` measures capture plus encode CPU time, see [encoding.md](encoding.md#cpu-measurement).
 
 ## Tests
 
-`cargo test` in `src/screendockd` runs unit tests and the integration tests in `tests/` (framing, X11 capture, daemon end to end, daemon against a simulated dock; with `--features encode-ffmpeg` also the libx264 encoder). Hardware access is replaced by a regular file, pipe or socket through `HidrawHandle::from_file`, and the dock's conversation by `fake_dock`. No default test needs a dock or a hidraw node. The X11 capture and daemon tests start their own Xvfb and skip when Xvfb is not installed. See [testing.md](testing.md).
+`cargo test` in `src/screendockd` runs unit tests and the integration tests in `tests/`, grouped by area: `protocol` (framing), `session` (the session against a simulated dock), `capture` (X11 capture), `e2e` (the daemon end to end against Xvfb) and, with `--features encode-ffmpeg`, `encode` (the libx264 encoder). Shared Xvfb and X11 painting helpers are in `tests/support/`. Hardware access is replaced by a regular file, pipe or socket through `HidrawHandle::from_file`, and the dock's conversation by `testing::fake_dock`. No default test needs a dock or a hidraw node. The X11 capture and daemon tests start their own Xvfb and skip when Xvfb is not installed. See [testing.md](testing.md).

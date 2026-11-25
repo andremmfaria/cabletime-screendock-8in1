@@ -7,10 +7,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::config::{Config, X264Preset};
 use crate::ports::capture::Frame;
 use crate::protocol::annexb::{contains_idr, AnnexBError};
 use crate::protocol::display::DisplayGeometry;
+use crate::utils::config::{Config, X264Preset};
 
 /// Frame rate used when the config leaves pacing disabled (`capture.fps = 0`).
 pub const DEFAULT_FPS: u32 = 25;

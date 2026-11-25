@@ -1,18 +1,16 @@
 //! End to end daemon test: the `run` subcommand against a real Xvfb display, the pre-recorded
 //! test encoder, and regular files standing in for the two hidraw nodes. Files cannot hold a
 //! dock conversation, so these runs pass `--no-handshake`; the handshake is covered against a
-//! simulated dock in `tests/session_dock.rs`.
+//! simulated dock in `tests/session/dock.rs`.
 //!
 //! Skips when Xvfb is unavailable (`SCREENDOCK_REQUIRE_XVFB=1` makes that a failure).
-
-mod common;
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use common::{require_xvfb, Painter, HEIGHT, WIDTH};
+use crate::support::{require_xvfb, Painter, HEIGHT, WIDTH};
 use screendockd::adapters::transport::hidraw::HidrawHandle;
 use screendockd::protocol::annexb::messages_from_annexb;
 use screendockd::protocol::framing::{

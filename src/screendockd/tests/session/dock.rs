@@ -35,7 +35,7 @@ fn encoder() -> PrerecordedEncoder {
         fps: 25,
         keyframe_interval: 3,
         bitrate_kbps: 1000,
-        preset: screendockd::config::X264Preset::Ultrafast,
+        preset: screendockd::utils::config::X264Preset::Ultrafast,
         zerolatency: true,
         vbv_buffer_ms: 200,
     };
