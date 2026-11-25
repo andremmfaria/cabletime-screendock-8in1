@@ -59,8 +59,9 @@ use std::env;
 use std::path::PathBuf;
 
 pub use super::types::{
-    CaptureBackendChoice, CaptureConfig, Config, ConfigError, DaemonConfig, DeviceConfig,
-    DisplayConfig, EncodeConfig, X264Preset,
+    CaptureBackendChoice, CaptureConfig, Config, ConfigError, ControlConfig, DaemonConfig,
+    DeviceConfig, DisplayConfig, DisplayMode, EdidSource, EncodeConfig, FallbackPolicy, Placement,
+    VirtualDisplayConfig, WaylandBackend, X264Preset,
 };
 use super::types::{CONFIG_DIR_NAME, CONFIG_FILE_NAME, CONFIG_PATH_ENV_VAR, SYSTEM_CONFIG_PATH};
 
@@ -169,6 +170,68 @@ mod tests {
         assert_eq!(config.daemon.heartbeat_interval_ms, 1000);
         assert_eq!(config.device.vendor_id_hex, "1de1");
         assert_eq!(config.device.product_id_hex, "f201");
+        assert_eq!(config.virtual_display, VirtualDisplayConfig::default());
+        assert_eq!(config.control, ControlConfig::default());
+    }
+
+    const MINIMAL: &str = "[display]\nwidth = 1\nheight = 2\norientation = \"landscape\"\n\
+                           [daemon]\nlog_level = \"info\"\nheartbeat_interval_ms = 1000\n\
+                           [device]\nvendor_id_hex = \"1de1\"\nproduct_id_hex = \"f201\"\n";
+
+    #[test]
+    fn virtual_display_and_control_sections_default_when_absent() {
+        let config: Config = toml::from_str(MINIMAL).unwrap();
+        let virtual_display = &config.virtual_display;
+        assert_eq!(virtual_display.mode, DisplayMode::Mirror);
+        assert_eq!(virtual_display.placement, Placement::RightOf);
+        assert_eq!(virtual_display.anchor, "primary");
+        assert_eq!((virtual_display.x, virtual_display.y), (0, 0));
+        assert_eq!(virtual_display.name, "");
+        assert_eq!(virtual_display.fallback, FallbackPolicy::Mirror);
+        assert_eq!(virtual_display.wayland_backend, WaylandBackend::Auto);
+        assert!(virtual_display.follow_system_changes);
+        assert_eq!(virtual_display.edid, EdidSource::Dock);
+        assert!(virtual_display.restore_on_exit);
+        assert!(config.control.enabled);
+        assert_eq!(config.control.socket, "");
+    }
+
+    #[test]
+    fn virtual_display_and_control_sections_parse_overrides() {
+        let text = format!(
+            "{MINIMAL}[virtual_display]\nmode = \"extend\"\nplacement = \"left-of\"\nanchor = \"HDMI-1\"\n\
+             x = -5\ny = 7\nname = \"Dock\"\nfallback = \"fail\"\nwayland_backend = \"wlroots\"\n\
+             follow_system_changes = false\nedid = \"synthetic\"\nrestore_on_exit = false\n\
+             [control]\nenabled = false\nsocket = \"/tmp/c.sock\"\n"
+        );
+        let config: Config = toml::from_str(&text).unwrap();
+        let virtual_display = &config.virtual_display;
+        assert_eq!(virtual_display.mode, DisplayMode::Extend);
+        assert_eq!(virtual_display.placement, Placement::LeftOf);
+        assert_eq!(virtual_display.anchor, "HDMI-1");
+        assert_eq!((virtual_display.x, virtual_display.y), (-5, 7));
+        assert_eq!(virtual_display.name, "Dock");
+        assert_eq!(virtual_display.fallback, FallbackPolicy::Fail);
+        assert_eq!(virtual_display.wayland_backend, WaylandBackend::Wlroots);
+        assert!(!virtual_display.follow_system_changes);
+        assert_eq!(virtual_display.edid, EdidSource::Synthetic);
+        assert!(!virtual_display.restore_on_exit);
+        assert!(!config.control.enabled);
+        assert_eq!(config.control.socket, "/tmp/c.sock");
+    }
+
+    #[test]
+    fn unknown_virtual_display_values_are_config_errors() {
+        for bad in [
+            "mode = \"clone\"",
+            "placement = \"beside\"",
+            "wayland_backend = \"kwin\"",
+            "fallback = \"retry\"",
+            "edid = \"off\"",
+        ] {
+            let text = format!("{MINIMAL}[virtual_display]\n{bad}\n");
+            assert!(toml::from_str::<Config>(&text).is_err(), "{bad}");
+        }
     }
 
     #[test]

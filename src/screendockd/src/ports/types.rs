@@ -225,3 +225,55 @@ pub trait DockTransport: Send + 'static {
     /// Duplicates the transport, so a reader thread and a writer can each own one.
     fn try_clone(&self) -> Result<Box<dyn DockTransport>, TransportError>;
 }
+
+/// Identifier of an output (a display connector) on the display server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutputId(pub u32);
+
+/// A rectangle in desktop coordinates. The origin may be negative on desktops that allow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The display server the session talks to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DisplayServer {
+    X11,
+    Wayland,
+    /// No graphical session was found.
+    #[default]
+    None,
+}
+
+/// One output of the desktop as the display server reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFacts {
+    pub id: OutputId,
+    pub name: String,
+    pub rect: Rect,
+    pub primary: bool,
+}
+
+/// What the environment offers for creating a virtual monitor. Gathered by an adapter, read by
+/// the display policy; holds data only.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DisplayFacts {
+    pub server: DisplayServer,
+    /// `$XDG_CURRENT_DESKTOP`, for example `ubuntu:GNOME`. Empty when unset.
+    pub desktop: String,
+    pub outputs: Vec<OutputFacts>,
+    /// RandR version as (major, minor) when the X server has the extension.
+    pub randr_version: Option<(u32, u32)>,
+    /// An output that can take a custom mode, so the monitor can be a real output.
+    pub spare_output: Option<OutputId>,
+    /// `org.gnome.Mutter.ScreenCast` is on the session bus.
+    pub mutter_screencast: bool,
+    /// The portal's `AvailableSourceTypes` bit mask, when a portal answered.
+    pub portal_source_types: Option<u32>,
+    /// A sway IPC socket is reachable.
+    pub sway_socket: bool,
+}

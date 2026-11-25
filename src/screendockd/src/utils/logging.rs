@@ -53,7 +53,8 @@ pub fn init_logging(config: &Config) -> Result<(), Box<dyn std::error::Error + S
 mod tests {
     use super::*;
     use crate::utils::config::{
-        CaptureConfig, DaemonConfig, DeviceConfig, DisplayConfig, EncodeConfig,
+        CaptureConfig, ControlConfig, DaemonConfig, DeviceConfig, DisplayConfig, EncodeConfig,
+        VirtualDisplayConfig,
     };
 
     fn test_config(log_level: &str) -> Config {
@@ -65,6 +66,8 @@ mod tests {
             },
             capture: CaptureConfig::default(),
             encode: EncodeConfig::default(),
+            virtual_display: VirtualDisplayConfig::default(),
+            control: ControlConfig::default(),
             daemon: DaemonConfig {
                 log_level: log_level.to_string(),
                 heartbeat_interval_ms: 1000,

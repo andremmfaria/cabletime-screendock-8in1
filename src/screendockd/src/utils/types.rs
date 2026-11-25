@@ -174,6 +174,92 @@ impl Default for EncodeConfig {
     }
 }
 
+/// What the daemon does when the virtual monitor cannot be created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FallbackPolicy {
+    /// Continue in mirror mode and report the reason.
+    #[default]
+    Mirror,
+    /// End startup with an error.
+    Fail,
+}
+
+/// Where the virtual monitor's identity data comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdidSource {
+    /// The dock's own EDID, with synthetic values when the dock sent none.
+    #[default]
+    Dock,
+    /// Always synthetic values.
+    Synthetic,
+}
+
+/// Virtual monitor settings. Every field is optional in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct VirtualDisplayConfig {
+    /// `mirror` captures an existing screen; `extend` creates a monitor for the dock.
+    pub mode: DisplayMode,
+    /// Where the monitor sits relative to `anchor`.
+    pub placement: Placement,
+    /// Output name the placement is relative to, or `primary`.
+    pub anchor: String,
+    /// Monitor position when `placement` is `at`.
+    pub x: i32,
+    pub y: i32,
+    /// Monitor name; empty selects the name from the dock's EDID, else `ScreenDock`.
+    pub name: String,
+    /// What to do when the monitor cannot be created.
+    pub fallback: FallbackPolicy,
+    /// Wayland mechanism that provides the monitor.
+    pub wayland_backend: WaylandBackend,
+    /// Follow size, rotation and position changes made outside the daemon.
+    pub follow_system_changes: bool,
+    /// Where the monitor's identity data comes from.
+    pub edid: EdidSource,
+    /// Restore the previous layout when the daemon exits.
+    pub restore_on_exit: bool,
+}
+
+impl Default for VirtualDisplayConfig {
+    fn default() -> Self {
+        Self {
+            mode: DisplayMode::Mirror,
+            placement: Placement::RightOf,
+            anchor: "primary".into(),
+            x: 0,
+            y: 0,
+            name: String::new(),
+            fallback: FallbackPolicy::Mirror,
+            wayland_backend: WaylandBackend::Auto,
+            follow_system_changes: true,
+            edid: EdidSource::Dock,
+            restore_on_exit: true,
+        }
+    }
+}
+
+/// Control socket settings. Every field is optional in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct ControlConfig {
+    /// Serve the control socket while the daemon runs.
+    pub enabled: bool,
+    /// Socket path; empty selects `$XDG_RUNTIME_DIR/screendockd/control.sock`.
+    pub socket: String,
+}
+
+impl Default for ControlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            socket: String::new(),
+        }
+    }
+}
+
 /// Daemon-level runtime settings.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct DaemonConfig {
@@ -202,6 +288,10 @@ pub struct Config {
     pub capture: CaptureConfig,
     #[serde(default)]
     pub encode: EncodeConfig,
+    #[serde(default)]
+    pub virtual_display: VirtualDisplayConfig,
+    #[serde(default)]
+    pub control: ControlConfig,
     pub daemon: DaemonConfig,
     pub device: DeviceConfig,
 }

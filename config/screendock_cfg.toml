@@ -44,6 +44,39 @@ keyframe_interval = 50
 # included (100 ms at 4000 kbit/s is 400 kbit). 0 turns the cap off.
 vbv_buffer_ms = 100
 
+[virtual_display]
+# "mirror" captures an existing screen and scales it to the dock. "extend" creates a monitor for
+# the dock and captures exactly that monitor. Switchable at runtime. The monitor size is the
+# [display] width and height.
+mode = "mirror"
+# Where the monitor sits relative to the anchor: "right-of", "left-of", "above", "below" or
+# "at" (the x and y below). Applied on X11 and sway; GNOME and the portal choose their own layout.
+placement = "right-of"
+# Output name the placement is relative to, or "primary".
+anchor = "primary"
+# Monitor position when placement is "at".
+x = 0
+y = 0
+# Monitor name. Empty uses the name from the dock's EDID, else "ScreenDock".
+name = ""
+# What to do when the monitor cannot be created: "mirror" (continue and report the reason) or "fail".
+fallback = "mirror"
+# Wayland mechanism: "auto" (Mutter on GNOME, a headless output on sway, else the portal), "mutter",
+# "portal" or "wlroots".
+wayland_backend = "auto"
+# Follow size, rotation and position changes made in the desktop's display settings.
+follow_system_changes = true
+# Where the monitor's identity data comes from: "dock" (the dock's EDID) or "synthetic".
+edid = "dock"
+# Restore the previous layout when the daemon exits.
+restore_on_exit = true
+
+[control]
+# Serve the control socket used by `screendockd ctl`.
+enabled = true
+# Socket path. Empty uses $XDG_RUNTIME_DIR/screendockd/control.sock.
+socket = ""
+
 [daemon]
 # Tracing/log level: "trace", "debug", "info", "warn", or "error". Overridable at runtime via
 # the RUST_LOG environment variable, which takes precedence over this value (see

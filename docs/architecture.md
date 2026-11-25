@@ -41,6 +41,8 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `adapters::encode` | Message policy (`messages_from_packet`), `create_encoder`, libx264 encoder (`adapters::encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`adapters::encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
 | `protocol::display` | `DisplayGeometry`: validated width, height and orientation, header size | Implemented, unit tested |
 | `core::policy` | Session timing defaults and polling constants | Implemented |
+| `core::display_policy` | Pure display policy: `decide` chooses mirror or a virtual monitor mechanism (`X11Randr` with its tier, `Mutter`, `Portal`, `Wlroots`) from `DisplayFacts` and the `[virtual_display]` section, `virtual_support` reports `Supported`, `Unsupported` with a reason or `Unknown`, and `place_monitor` computes the monitor rectangle from the placement, anchor and size | Implemented, unit tested |
+| `ports::display` | `DisplayFacts` (display server, desktop, outputs, RandR version, spare output, Mutter ScreenCast, portal source types, sway socket), `OutputFacts`, `OutputId` and `Rect` | Implemented, unit tested |
 | `core::reconfig` | The live settings model: `LiveSettings` (every setting that can change while the daemon runs), `SettingsPatch` (a validated partial change), `ChangeClass`, `ReconfigAction`, `ReconfigPlan` and the pure `plan_change`. See [Live settings and change classes](#live-settings-and-change-classes) | Implemented, unit tested |
 | `app::daemon` | The dock session plus the capture, encode, frame and write loop with the error policy; video is written only while the session is armed. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
 | `tools::bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
@@ -53,10 +55,10 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 
 | Directory | `types.rs` holds |
 |---|---|
-| `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `DisplayMode`, `Placement`, `WaylandBackend`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
+| `utils` | `Config` and its section structs, `CaptureBackendChoice`, `X264Preset`, `DisplayMode`, `Placement`, `WaylandBackend`, `FallbackPolicy`, `EdidSource`, `VirtualDisplayConfig`, `ControlConfig`, `ConfigError`, the config path constants, the logging environment variable name, `PixelWidth`, `PixelHeight`, `PictureSize` |
 | `protocol` | `ReportId`, `FrameHeader`, `ParsedMessage`, `MessageBuilder`, `FramingError`, the report size constants, `AnnexBError`, the NAL type constants, `Orientation`, `DisplayGeometry`, `DisplayError`, `SessionId`, `SessionIdError`, `DockMessage`, `InboundAssembler`, the host message constants |
-| `ports` | `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
-| `core` | the session timing defaults and polling constants |
+| `ports` | `OutputId`, `Rect`, `DisplayServer`, `OutputFacts`, `DisplayFacts`, `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
+| `core` | the session timing defaults and polling constants, and the display policy types `DisplayDecision`, `ExtendBackend`, `X11Tier`, `VirtualSupport` and `DisplayPolicyError` |
 | `core::reconfig` | `LiveSettings`, `SettingsPatch`, `SettingsError`, `ChangeClass`, `ReconfigAction`, `ReconfigPlan`, `PlanOptions` and the range limits |
 | `core::session` | `Session`, `SessionState`, `SessionHandle`, `SessionStats`, `SessionSettings`, `SessionError`, the shared state, the controller and reader event types |
 | `adapters` | nothing of its own; the subdirectories hold the adapter types |

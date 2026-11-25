@@ -23,6 +23,18 @@ The command line option `--config PATH` bypasses this order and loads that file 
 | `encode.bitrate_kbps` | integer | 4000 | libx264 target bit rate in kilobits per second; also the VBV maximum rate |
 | `encode.keyframe_interval` | integer | 50 | Frames between keyframes |
 | `encode.vbv_buffer_ms` | integer | 100 | VBV buffer in milliseconds of `encode.bitrate_kbps` (100 at 4000 gives 400 kbit); bounds the size of any one frame; 0 turns the cap off |
+| `virtual_display.mode` | string | `mirror` | `mirror` captures an existing screen; `extend` creates a monitor for the dock and captures exactly that monitor. Live key |
+| `virtual_display.placement` | string | `right-of` | `right-of`, `left-of`, `above`, `below` or `at`, relative to the anchor. Applied on X11 and sway; GNOME and the portal choose their own layout position. Live key |
+| `virtual_display.anchor` | string | `primary` | Output name the placement is relative to, or `primary`. Live key |
+| `virtual_display.x`, `virtual_display.y` | integer | 0 | Monitor position when `placement` is `at`. Within plus or minus 32767. Live keys |
+| `virtual_display.name` | string | empty | Monitor name, printable ASCII up to 64 bytes. Empty uses the name from the dock's EDID, else `ScreenDock`. Live key |
+| `virtual_display.fallback` | string | `mirror` | `mirror` continues in mirror mode and reports the reason when the monitor cannot be created; `fail` ends startup with an error. Read when the monitor is created |
+| `virtual_display.wayland_backend` | string | `auto` | `auto`, `mutter`, `portal` or `wlroots`. `auto` picks Mutter on GNOME, a headless output on sway, and the portal where it offers a virtual source. Live key |
+| `virtual_display.follow_system_changes` | boolean | true | Follow size, rotation and position changes made in the desktop's display settings. Live key |
+| `virtual_display.edid` | string | `dock` | `dock` uses the dock's EDID with synthetic values when the dock sent none; `synthetic` always uses synthetic values. Read when the monitor is created |
+| `virtual_display.restore_on_exit` | boolean | true | Restore the previous layout when the daemon exits. Read when the monitor is created |
+| `control.enabled` | boolean | true | Serve the control socket |
+| `control.socket` | string | empty | Socket path. Empty uses `$XDG_RUNTIME_DIR/screendockd/control.sock` |
 | `capture.backend` | string | `auto` | `auto`, `x11` or `wayland`. `auto` follows the detected session (`$XDG_SESSION_TYPE`, then `$WAYLAND_DISPLAY`, then `$DISPLAY`). `wayland` needs a build with the `capture-wayland` feature |
 | `capture.x11_display` | string | unset | X11 display to capture, for example `:0`. Unset uses `$DISPLAY` |
 | `capture.fps` | integer | 25 | Capture frame rate. 0 captures as fast as the backend allows |
@@ -30,6 +42,10 @@ The command line option `--config PATH` bypasses this order and loads that file 
 | `daemon.heartbeat_interval_ms` | integer | 1000 | Heartbeat interval in milliseconds |
 | `device.vendor_id_hex` | string | `1de1` | USB vendor ID that discovery matches. Four hex digits, optional `0x` |
 | `device.product_id_hex` | string | `f201` | USB product ID that discovery matches. Four hex digits, optional `0x` |
+
+## Live keys
+
+The keys marked live in the table above, together with `display.width`, `display.height`, `display.orientation`, `capture.fps`, `encode.preset`, `encode.tune_zerolatency`, `encode.bitrate_kbps`, `encode.vbv_buffer_ms` and `encode.keyframe_interval`, are the settings the daemon can change while it runs. The `[virtual_display]` and `[control]` sections are optional; without them the daemon mirrors and serves the control socket. The monitor size in extend mode is `display.width` by `display.height`. The class of each change is described in [architecture.md](architecture.md#live-settings-and-change-classes).
 
 ## Environment variables
 

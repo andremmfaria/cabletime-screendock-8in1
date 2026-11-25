@@ -7,12 +7,12 @@ use super::types::{
 use crate::ports::encode::{EncoderSettings, DEFAULT_FPS};
 use crate::protocol::display::{DisplayGeometry, Orientation};
 use crate::utils::config::Config;
-use crate::utils::types::{DisplayMode, Placement, WaylandBackend};
 
 impl TryFrom<&Config> for LiveSettings {
     type Error = SettingsError;
 
     fn try_from(config: &Config) -> Result<Self, Self::Error> {
+        let virtual_display = &config.virtual_display;
         Ok(Self {
             geometry: DisplayGeometry::from_config(&config.display)?,
             fps: config.capture.fps,
@@ -21,14 +21,14 @@ impl TryFrom<&Config> for LiveSettings {
             bitrate_kbps: config.encode.bitrate_kbps.max(1),
             vbv_buffer_ms: config.encode.vbv_buffer_ms,
             keyframe_interval: config.encode.keyframe_interval.max(1),
-            mode: DisplayMode::default(),
-            placement: Placement::default(),
-            anchor: "primary".into(),
-            x: 0,
-            y: 0,
-            name: String::new(),
-            wayland_backend: WaylandBackend::default(),
-            follow_system_changes: true,
+            mode: virtual_display.mode,
+            placement: virtual_display.placement,
+            anchor: virtual_display.anchor.clone(),
+            x: virtual_display.x,
+            y: virtual_display.y,
+            name: virtual_display.name.clone(),
+            wayland_backend: virtual_display.wayland_backend,
+            follow_system_changes: virtual_display.follow_system_changes,
         })
     }
 }
@@ -206,7 +206,7 @@ mod tests {
     use super::*;
     use crate::protocol::display::DisplayError;
     use crate::utils::config::load_from_path;
-    use crate::utils::types::{PictureSize, X264Preset};
+    use crate::utils::types::{DisplayMode, PictureSize, X264Preset};
 
     fn shipped() -> LiveSettings {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

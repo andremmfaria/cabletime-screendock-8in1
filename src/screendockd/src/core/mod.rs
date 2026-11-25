@@ -1,6 +1,7 @@
 //! Core logic that depends only on the ports and the protocol: the dock session and its timing
-//! policy, and the live settings model with its change classification.
+//! policy, the live settings model with its change classification, and the display policy.
 
+pub mod display_policy;
 pub mod policy;
 pub mod reconfig;
 pub mod session;
