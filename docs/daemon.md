@@ -23,11 +23,22 @@ Startup is fail fast. In this order, any failure prints the error chain and exit
 4. Create the capture backend.
 5. Create the encoder.
 6. Write the first heartbeat to MI_00 and start the session threads.
+7. Start the supervisor, the SIGHUP thread and the control socket.
 
 ## Loops
 
 - Session threads, owned by `core::session::Session`: a heartbeat thread that sends one heartbeat on MI_00 every `daemon.heartbeat_interval_ms` against fixed deadlines, independent of video writes; a reader thread that drains and parses the dock's MI_00 reports and answers its EDID passthrough; and a controller thread that runs the handshake and redoes it when the session is lost. When the dock is silent (no ready announcement, no replies) the controller still sends `app-launched`, the cursor message, passthrough id 103 and `notify-projection-started`, waits the 0.8 s settle delay and arms video in `AssumedActive`. See [protocol-implementation.md](protocol-implementation.md#session-handshake).
 - Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (width and height from the display geometry), then one `write(2)` per report back to back. While the session is not armed the loop captures and writes nothing. When the session becomes armed again after a loss, the encoder is asked for a keyframe.
+
+## Supervisor and threads
+
+Besides the session threads and the video loop, `run` starts these threads:
+
+- `supervisor`: owns the live settings. It receives every request from the control socket and every reload, validates and classifies the change, and applies it through the pipeline or rejects it. See [control.md](control.md#changing-settings).
+- `control-accept` and one short-lived `control-client` thread per connection: the control socket server, started when `control.enabled` is true and a socket path exists. A failure to bind the socket (another daemon serves it, or the path is not usable) is a startup error.
+- `sighup`: turns SIGHUP into a reload command for the supervisor.
+
+On shutdown the SIGHUP thread stops, the control socket closes and its file is removed, and the supervisor ends once no sender is left. The supervisor runs on its own thread, so a slow request never delays the video loop or the heartbeat.
 
 ## Errors after startup
 

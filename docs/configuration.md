@@ -68,7 +68,7 @@ capture [--frames N] [--out-dir DIR] [--backend auto|x11|wayland]
 run     [--mi00 PATH] [--mi01 PATH] [--h264-file PATH] [--backend auto|x11|wayland]
         [--max-frames N] [--no-handshake]
 bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
-ctl     [--socket PATH] status | get [KEY]
+ctl     [--socket PATH] status | get [KEY] | set KEY VALUE | reload
 ```
 
 | Option | Default | Meaning |
@@ -88,7 +88,7 @@ ctl     [--socket PATH] status | get [KEY]
 | `--max-frames` | unlimited | `run` stops after this many frames |
 | `--socket` | `control.socket` | `ctl` control socket path |
 
-Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `replay` opens MI_00 as well, to run the handshake, unless `--no-handshake` is given. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). `bench` takes `--duration-secs` like `isolate`. `ctl` is described in [control.md](control.md).
+Discovery runs only when a node needed by the command was not given on the command line. Heartbeat-only runs never open MI_01 and video-only runs never open MI_00. `replay` opens MI_00 as well, to run the handshake, unless `--no-handshake` is given. `capture` and `bench` never touch the dock; see [capture.md](capture.md) and [encoding.md](encoding.md#cpu-measurement). `run` is described in [daemon.md](daemon.md). SIGHUP makes a running daemon read the config file again, see [control.md](control.md#reload-and-sighup). `bench` takes `--duration-secs` like `isolate`. `ctl` is described in [control.md](control.md).
 
 ## Permissions
 

@@ -55,7 +55,7 @@ pub fn run() -> Result<ExitCode> {
         #[cfg(feature = "tools")]
         Command::Isolate(args) => done(isolate::run(args, &config)),
         Command::Capture(args) => done(capture::run(args, &config)),
-        Command::Run(args) => done(run::run(args, &config)),
+        Command::Run(args) => done(run::run(args, &config, cli.config.as_ref())),
         #[cfg(feature = "tools")]
         Command::Bench(args) => done(bench::run(args, &config)),
         Command::Ctl(args) => ctl::run(args, &config),

@@ -1,29 +1,37 @@
 //! The `run` subcommand.
 
-use std::collections::BTreeMap;
-use std::sync::mpsc::{self, Receiver};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
+use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
+use signal_hook::consts::SIGHUP;
+use signal_hook::iterator::Signals;
 
 use crate::adapters::capture::create_backend;
 use crate::adapters::control::{socket_path, ControlServer};
 use crate::adapters::encode::create_encoder;
 use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
-use crate::core::reconfig::keys::answer_read;
+use crate::app::supervisor::{NullPipeline, ReloadFn, Supervisor};
 use crate::core::reconfig::LiveSettings;
 use crate::ports::control::Command;
 use crate::ports::encode::EncoderSettings;
-use crate::protocol::control::ControlResponse;
 use crate::utils::config::Config;
 
 use super::support::{
-    device_ids, geometry, resolve_nodes, session_settings, shutdown_flag, warn_if_not_char_device,
+    device_ids, geometry, load_config, resolve_nodes, session_settings, shutdown_flag,
+    warn_if_not_char_device,
 };
-use super::types::RunArgs;
+use super::types::{RunArgs, Services};
 
-pub(super) fn run(args: RunArgs, config: &Config) -> Result<()> {
+/// How often the SIGHUP thread looks for a pending signal.
+const SIGHUP_POLL: Duration = Duration::from_millis(100);
+
+pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>) -> Result<()> {
     let geometry = geometry(config)?;
     let live = LiveSettings::try_from(config).context("invalid settings")?;
     let (mi00, mi01) = resolve_nodes(&device_ids(config)?, &args.nodes, true, true)?;
@@ -39,7 +47,7 @@ pub(super) fn run(args: RunArgs, config: &Config) -> Result<()> {
     let mut encoder =
         create_encoder(&args.encoder.kind(), settings).context("failed to start encoder")?;
     let stop = shutdown_flag()?;
-    let control = start_control(config, live)?;
+    let services = Services::start(config, live, reload_source(config_path.cloned()))?;
     tracing::info!(
         capture = capture.name(),
         encoder = encoder.name(),
@@ -61,49 +69,91 @@ pub(super) fn run(args: RunArgs, config: &Config) -> Result<()> {
         &params,
         &stop,
     );
-    if let Some((server, responder)) = control {
-        drop(server);
-        let _ = responder.join();
-    }
+    services.stop();
     let report = result.context("daemon failed")?;
     println!("{report:?}");
     Ok(())
 }
 
-/// Starts the control socket and the thread that answers its requests. Returns `None` when the
-/// control socket is disabled or no socket path is available.
-fn start_control(
-    config: &Config,
-    live: LiveSettings,
-) -> Result<Option<(ControlServer, JoinHandle<()>)>> {
-    if !config.control.enabled {
-        return Ok(None);
-    }
-    let Some(path) = socket_path(&config.control) else {
-        tracing::warn!("control socket disabled: no control.socket and $XDG_RUNTIME_DIR is unset");
-        return Ok(None);
-    };
-    let (commands, inbox) = mpsc::channel();
-    let server = ControlServer::start(&path, commands)
-        .with_context(|| format!("failed to start the control socket at {path:?}"))?;
-    let responder = std::thread::Builder::new()
-        .name("control-responder".into())
-        .spawn(move || answer_requests(&live, &inbox))
-        .context("failed to start the control responder")?;
-    Ok(Some((server, responder)))
+/// The function the supervisor calls to read the config file again: the file given with
+/// `--config`, or the first file of the resolution order.
+fn reload_source(path: Option<PathBuf>) -> ReloadFn {
+    Box::new(move || {
+        let config = load_config(path.as_ref()).map_err(|e| format!("{e:#}"))?;
+        LiveSettings::try_from(&config).map_err(|e| e.to_string())
+    })
 }
 
-/// Answers control requests from fixed settings until the server is gone. Requests that change
-/// state are declined.
-fn answer_requests(live: &LiveSettings, inbox: &Receiver<Command>) {
-    let mut extra = BTreeMap::new();
-    extra.insert("version".to_string(), env!("CARGO_PKG_VERSION").to_string());
-    extra.insert("pid".to_string(), std::process::id().to_string());
-    while let Ok(command) = inbox.recv() {
-        if let Command::Request { request, reply } = command {
-            let response = answer_read(live, &request, extra.clone())
-                .unwrap_or_else(|| ControlResponse::rejected("changing settings is not available"));
-            let _ = reply.send(response);
+impl Services {
+    /// Starts the supervisor thread, the SIGHUP thread and, when the config enables it and a
+    /// socket path exists, the control socket.
+    pub(super) fn start(config: &Config, live: LiveSettings, reload: ReloadFn) -> Result<Self> {
+        let (commands, inbox) = mpsc::channel();
+        let halt = Arc::new(AtomicBool::new(false));
+
+        let server = if config.control.enabled {
+            match socket_path(&config.control) {
+                Some(path) => Some(
+                    ControlServer::start(&path, commands.clone()).with_context(|| {
+                        format!("failed to start the control socket at {path:?}")
+                    })?,
+                ),
+                None => {
+                    tracing::warn!(
+                        "control socket disabled: no control.socket and $XDG_RUNTIME_DIR is unset"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let supervisor = Supervisor::new(live, reload, Box::new(NullPipeline))
+            .with_status_field("version", env!("CARGO_PKG_VERSION"))
+            .with_status_field("pid", std::process::id().to_string());
+        let supervisor = std::thread::Builder::new()
+            .name("supervisor".into())
+            .spawn(move || supervisor.run(&inbox))
+            .context("failed to start the supervisor")?;
+        let sighup = spawn_sighup(commands.clone(), Arc::clone(&halt))?;
+        Ok(Self {
+            commands: Some(commands),
+            server,
+            halt,
+            sighup: Some(sighup),
+            supervisor: Some(supervisor),
+        })
+    }
+
+    /// Stops the SIGHUP thread, closes the control socket and ends the supervisor.
+    pub(super) fn stop(mut self) {
+        self.halt.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.sighup.take() {
+            let _ = thread.join();
+        }
+        drop(self.server.take());
+        drop(self.commands.take());
+        if let Some(thread) = self.supervisor.take() {
+            let _ = thread.join();
         }
     }
+}
+
+/// A thread that turns SIGHUP into [`Command::Reload`] until `halt` is set.
+fn spawn_sighup(commands: Sender<Command>, halt: Arc<AtomicBool>) -> Result<JoinHandle<()>> {
+    let mut signals = Signals::new([SIGHUP]).context("failed to install the SIGHUP handler")?;
+    std::thread::Builder::new()
+        .name("sighup".into())
+        .spawn(move || {
+            while !halt.load(Ordering::Relaxed) {
+                for _ in signals.pending() {
+                    if commands.send(Command::Reload).is_err() {
+                        return;
+                    }
+                }
+                std::thread::sleep(SIGHUP_POLL);
+            }
+        })
+        .context("failed to start the SIGHUP thread")
 }

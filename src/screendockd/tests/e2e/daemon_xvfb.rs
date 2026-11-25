@@ -37,10 +37,19 @@ pub(crate) fn make_nodes(dir: &Path) {
 }
 
 pub(crate) fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
+    spawn_daemon_with_config(display, dir, &config(), extra)
+}
+
+pub(crate) fn spawn_daemon_with_config(
+    display: &str,
+    dir: &Path,
+    config_path: &str,
+    extra: &[&str],
+) -> Child {
     Command::new(env!("CARGO_BIN_EXE_screendockd"))
         .args([
             "--config",
-            &config(),
+            config_path,
             "run",
             "--backend",
             "x11",

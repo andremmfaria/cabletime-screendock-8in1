@@ -39,9 +39,11 @@ Request text from clients is never used as a path or format string. Names echoed
 ```text
 screendockd [--config PATH] ctl [--socket PATH] status
 screendockd [--config PATH] ctl [--socket PATH] get [KEY]
+screendockd [--config PATH] ctl [--socket PATH] set KEY VALUE
+screendockd [--config PATH] ctl [--socket PATH] reload
 ```
 
-`status` prints `name: value` lines: every setting plus `version` and `pid`. `get` without a key prints every setting in the same form; `get KEY` prints only the value. A command that fails prints its reason on standard error.
+`status` prints `name: value` lines: every setting plus `version` and `pid`. `get` without a key prints every setting in the same form; `get KEY` prints only the value. `set` and `reload` print `applied (CLASS): NAMES` with the settings that changed, or `applied (CLASS): nothing to change`. A command that fails prints its reason on standard error. A value that starts with a minus sign, such as `set x -20`, is read as a value.
 
 | Exit code | Meaning |
 |---|---|
@@ -50,6 +52,23 @@ screendockd [--config PATH] ctl [--socket PATH] get [KEY]
 | 2 | The daemon rejected the request |
 | 3 | No daemon answers on the socket |
 | 4 | The request was invalid |
+
+## Changing settings
+
+`set` and `reload` go through the supervisor, the one owner of the live settings in the daemon, in this order:
+
+1. The key and value are read and the new settings are validated as a whole. A bad key, a value of the wrong type, a value out of range or a size that is odd or disagrees with the orientation gives `invalid` (exit code 4) and changes nothing.
+2. The change is classified (see [architecture.md](architecture.md#live-settings-and-change-classes)) into the steps it needs.
+3. If the running pipeline can do every step, they are executed and the answer is `applied` with the class and the names of the settings that changed. Setting a key to its current value is `applied` with no names.
+4. Otherwise the answer is `rejected` (exit code 2) with the steps the pipeline cannot do, and the settings stay as they were.
+
+The settings of the running daemon are not written to the config file; they last until the daemon exits. Requests are handled one at a time in arrival order.
+
+The pipeline can record the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`. Changes to `resolution`, `orientation`, `fps`, `preset`, `tune`, `bitrate`, `vbv-buffer-ms`, `keyframe-interval` and `mode` need steps the pipeline cannot do and are rejected.
+
+## Reload and SIGHUP
+
+`ctl reload` and SIGHUP both make the daemon read the config file again: the file given with `--config`, or the first file of the resolution order in [configuration.md](configuration.md#config-file). The new file's settings are compared with the live settings, and only the differences are applied through the same path as `set`, as one change: if any difference is rejected, nothing is applied. This also reverts a setting changed with `set` to the file's value. A file that cannot be read or parsed is reported as `rejected` with the reason and changes nothing. SIGHUP has no client to answer, so its result is logged: `config reloaded` with the class and the changed names at info level, or `config reload failed` with the reason at warn level.
 
 ## Settings
 

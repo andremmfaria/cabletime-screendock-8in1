@@ -1,6 +1,6 @@
 # Architecture
 
-`screendockd` is one Rust crate (`src/screendockd`) with a library and a binary. The library holds every module; the binary (`src/main.rs`) only calls `cli::run`, which holds the command line. The daemon is one process: a video loop for capture, encode and framing on the calling thread, and a dock session (heartbeat, MI_00 reader and handshake controller threads) on MI_00, all talking to the dock through hidraw.
+`screendockd` is one Rust crate (`src/screendockd`) with a library and a binary. The library holds every module; the binary (`src/main.rs`) only calls `cli::run`, which holds the command line. The daemon is one process: a video loop for capture, encode and framing on the calling thread, a dock session (heartbeat, MI_00 reader and handshake controller threads) on MI_00, all talking to the dock through hidraw, and a supervisor thread that owns the live settings and serves the control socket and SIGHUP.
 
 ## Data flow
 
@@ -44,6 +44,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `protocol::control` | The control wire format: `ControlRequest` and `ControlResponse` as one JSON object per line, with a 4096 byte request cap. See [control.md](control.md) | Implemented, unit tested |
 | `ports::control` | `Command` (a request with its reply sender, or a reload), `ControlClient` and `ControlError` | Implemented |
 | `adapters::control` | `ControlServer` (the 0600 Unix socket and its accept thread, removed on drop) and `UnixControlClient`; `socket_path` resolves the path from the config | Implemented, unit tested, tested against the daemon binary |
+| `app::supervisor` | `Supervisor`, the single owner of the live settings: handles `Command`s, validates and classifies each change with `plan_change_with`, applies it through a `PipelineHandle` or rejects it, and answers `status` and `get`. Config reload and SIGHUP use the same path. See [control.md](control.md#changing-settings) | Implemented, unit tested |
 | `core::reconfig::keys` | The names of the live settings on the control interface: `SettingKey`, `setting_values`, `changed_keys` and `answer_read`, which answers `status` and `get` | Implemented, unit tested |
 | `core::display_policy` | Pure display policy: `decide` chooses mirror or a virtual monitor mechanism (`X11Randr` with its tier, `Mutter`, `Portal`, `Wlroots`) from `DisplayFacts` and the `[virtual_display]` section, `virtual_support` reports `Supported`, `Unsupported` with a reason or `Unknown`, and `place_monitor` computes the monitor rectangle from the placement, anchor and size | Implemented, unit tested |
 | `ports::display` | `DisplayFacts` (display server, desktop, outputs, RandR version, spare output, Mutter ScreenCast, portal source types, sway socket), `OutputFacts`, `OutputId` and `Rect` | Implemented, unit tested |
@@ -70,8 +71,8 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 | `adapters::capture` | `SessionType`, `BackendKind`, `X11ShmCapture`, `WaylandPortalCapture` and the Wayland stream state |
 | `adapters::encode` | `EncoderKind`, `FfmpegEncoder`, `PrerecordedEncoder` |
 | `adapters::transport` | `HidrawHandle`, `Mi00Path`, `Mi01Path`, `DeviceIds`, `DockHidrawPaths`, `DiscoveryError`, the discovery constants |
-| `app` | `DaemonParams`, `DaemonReport`, `DaemonError`, the daemon constants |
-| `cli` | the clap argument structs and enums and the parsed command |
+| `app` | `DaemonParams`, `DaemonReport`, `DaemonError`, the daemon constants, `Supervisor`, the `PipelineHandle` trait, `NullPipeline` and `ReloadFn` |
+| `cli` | the clap argument structs and enums, the parsed command and `Services` (the supervisor, SIGHUP and control socket of a running daemon) |
 | `tools` | the replay, isolate, heartbeat and bench parameter, report and statistics types and their errors |
 | `testing` | `FakeDock`, `FakeDockConfig`, `StartedReply`, `VideoStats` and the fake dock state |
 

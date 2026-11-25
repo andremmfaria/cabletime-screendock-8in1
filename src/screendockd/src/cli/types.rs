@@ -1,11 +1,17 @@
 //! Types of the command line: argument structs and enums and the parsed command.
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::thread::JoinHandle;
 #[cfg(feature = "tools")]
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use crate::adapters::control::ControlServer;
+use crate::ports::control::Command as ControlCommand;
 #[cfg(feature = "tools")]
 use crate::tools::validation::IsolateMode;
 use crate::utils::config::CaptureBackendChoice;
@@ -63,6 +69,16 @@ pub(super) enum CtlAction {
         /// Setting name, for example `bitrate`. Without it every setting is printed.
         key: Option<String>,
     },
+    /// Change one setting of the running daemon.
+    Set {
+        /// Setting name, for example `bitrate`.
+        key: String,
+        /// New value, for example `2000` or `1600x900`.
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+    /// Make the daemon re-read its config file and apply the differences.
+    Reload,
 }
 
 #[derive(Debug, Args)]
@@ -223,4 +239,13 @@ pub(super) struct RunArgs {
     pub(super) max_frames: Option<u64>,
     #[command(flatten)]
     pub(super) handshake: HandshakeArgs,
+}
+
+/// The threads and the socket that serve a running daemon's settings.
+pub(super) struct Services {
+    pub(super) commands: Option<Sender<ControlCommand>>,
+    pub(super) server: Option<ControlServer>,
+    pub(super) halt: Arc<AtomicBool>,
+    pub(super) sighup: Option<JoinHandle<()>>,
+    pub(super) supervisor: Option<JoinHandle<()>>,
 }

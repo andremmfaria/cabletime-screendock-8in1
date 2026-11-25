@@ -1,9 +1,11 @@
 //! Types of the application layer: daemon parameters, report and errors.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use thiserror::Error;
 
+use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::session::{SessionError, SessionSettings};
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::ReportId;
@@ -69,4 +71,32 @@ pub struct DaemonReport {
     /// Heartbeats the dock sent that the reader saw.
     pub dock_heartbeats_seen: u64,
     pub elapsed: Duration,
+}
+
+/// Produces the settings the config file holds now, or the reason it cannot.
+pub type ReloadFn = Box<dyn FnMut() -> Result<LiveSettings, String> + Send>;
+
+/// What the supervisor drives: the running pipeline, seen as the steps it can execute.
+pub trait PipelineHandle: Send {
+    /// The steps this pipeline can execute while it runs.
+    fn supported(&self) -> Vec<ReconfigAction>;
+
+    /// Facts that change how the supervisor classifies a change.
+    fn options(&self) -> PlanOptions;
+
+    /// Executes a plan whose steps are all supported. The error text is shown to the client.
+    fn apply(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+}
+
+/// A pipeline that can only record the follow setting; every other step is unsupported.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NullPipeline;
+
+/// The single owner of the live settings; see [`supervisor`](super::supervisor).
+pub struct Supervisor {
+    pub(super) live: LiveSettings,
+    pub(super) reload: ReloadFn,
+    pub(super) pipeline: Box<dyn PipelineHandle>,
+    pub(super) extra: BTreeMap<String, String>,
+    pub(super) changes_applied: u64,
 }

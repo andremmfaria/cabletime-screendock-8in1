@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::daemon_xvfb::{config, make_nodes, spawn_daemon, wait_exit};
+use crate::daemon_xvfb::{config, make_nodes, spawn_daemon, spawn_daemon_with_config, wait_exit};
 use crate::support::require_xvfb;
 
 fn socket(runtime: &Path) -> PathBuf {
@@ -92,6 +92,112 @@ fn ctl_reports_the_running_daemons_settings_and_the_socket_is_private() {
         !socket(dir.path()).exists(),
         "the socket file must go away at exit"
     );
+}
+
+#[test]
+fn ctl_set_applies_live_changes_and_rejects_what_the_pipeline_cannot_do() {
+    let Some(xvfb) = require_xvfb() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    make_nodes(dir.path());
+    let mut child = spawn_daemon(&xvfb.display, dir.path(), &[]);
+    wait_for_socket(dir.path());
+
+    let applied = ctl(dir.path(), &["set", "follow-system-changes", "false"]);
+    assert_eq!(applied.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&applied.stdout).contains("applied (live)"));
+    let got = ctl(dir.path(), &["get", "follow-system-changes"]);
+    assert_eq!(String::from_utf8(got.stdout).unwrap(), "false\n");
+
+    // Changing the size needs a dock cycle, which this pipeline cannot do.
+    let rejected = ctl(dir.path(), &["set", "resolution", "1600x900"]);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&rejected.stderr).starts_with("rejected"));
+    let got = ctl(dir.path(), &["get", "resolution"]);
+    assert_eq!(String::from_utf8(got.stdout).unwrap(), "1280x720\n");
+
+    for bad in [
+        ["bitrate", "abc"],
+        ["volume", "3"],
+        ["resolution", "1281x720"],
+    ] {
+        let invalid = ctl(dir.path(), &["set", bad[0], bad[1]]);
+        assert_eq!(invalid.status.code(), Some(4), "{bad:?}");
+    }
+    // A negative value is a value, not an option.
+    let negative = ctl(dir.path(), &["set", "x", "-20"]);
+    assert_eq!(negative.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(ctl(dir.path(), &["get", "x"]).stdout).unwrap(),
+        "-20\n"
+    );
+
+    terminate(&mut child);
+}
+
+fn wait_for_value(runtime: &Path, key: &str, expected: &str) {
+    let start = Instant::now();
+    loop {
+        let got = ctl(runtime, &["get", key]);
+        if String::from_utf8_lossy(&got.stdout).trim() == expected {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{key} never became {expected}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn sighup_and_ctl_reload_apply_the_config_file_differences() {
+    let Some(xvfb) = require_xvfb() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    make_nodes(dir.path());
+    let config_path = dir.path().join("cfg.toml");
+    let original = std::fs::read_to_string(config()).unwrap();
+    std::fs::write(&config_path, &original).unwrap();
+    let mut child = spawn_daemon_with_config(
+        &xvfb.display,
+        dir.path(),
+        config_path.to_str().unwrap(),
+        &[],
+    );
+    wait_for_socket(dir.path());
+    wait_for_value(dir.path(), "follow-system-changes", "true");
+
+    // Edit the file and signal: the difference is applied through the supervisor.
+    std::fs::write(
+        &config_path,
+        original.replace(
+            "follow_system_changes = true",
+            "follow_system_changes = false",
+        ),
+    )
+    .unwrap();
+    let signalled = Command::new("kill")
+        .arg("-HUP")
+        .arg(child.id().to_string())
+        .status()
+        .unwrap();
+    assert!(signalled.success());
+    wait_for_value(dir.path(), "follow-system-changes", "false");
+
+    // The same through the control socket.
+    std::fs::write(&config_path, &original).unwrap();
+    let reloaded = ctl(dir.path(), &["reload"]);
+    assert_eq!(reloaded.status.code(), Some(0), "{reloaded:?}");
+    assert!(String::from_utf8_lossy(&reloaded.stdout).contains("follow-system-changes"));
+    wait_for_value(dir.path(), "follow-system-changes", "true");
+
+    // A file that no longer parses is reported and changes nothing.
+    std::fs::write(&config_path, "this is not toml [").unwrap();
+    let broken = ctl(dir.path(), &["reload"]);
+    assert_eq!(broken.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&broken.stderr).contains("config reload failed"));
+    wait_for_value(dir.path(), "follow-system-changes", "true");
+
+    terminate(&mut child);
 }
 
 #[test]

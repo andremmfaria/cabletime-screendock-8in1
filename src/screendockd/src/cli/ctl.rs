@@ -27,6 +27,11 @@ fn request_for(action: &CtlAction) -> ControlRequest {
     match action {
         CtlAction::Status => ControlRequest::Status {},
         CtlAction::Get { key } => ControlRequest::Get { key: key.clone() },
+        CtlAction::Set { key, value } => ControlRequest::Set {
+            key: key.clone(),
+            value: value.clone(),
+        },
+        CtlAction::Reload => ControlRequest::Reload {},
     }
 }
 
