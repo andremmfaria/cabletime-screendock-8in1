@@ -2,7 +2,7 @@
 
 Status: requires on-device validation. Everything here is implemented and passes loopback tests against files and pipes, which say nothing about the dock's timing or rendering. The procedures below are run by a person with the dock attached. Results are recorded by the person running them; none are recorded in this repository yet.
 
-Two milestones are covered: M2 (native write timing) and M3 (heartbeat dependency isolation).
+Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation), the M5 CPU criterion, M6 (the streaming daemon) and M7 (resolution picker).
 
 ## Preparation
 
@@ -84,6 +84,52 @@ The result to derive from the three records: whether video renders without the h
 
 A written observation for all three conditions, not only (c).
 
+## M5: CPU cost of capture plus encode
+
+Goal: record the sustained CPU use of screen capture plus libx264 encoding at 25 fps and 1280x720. No dock is needed. Needs a build with `--features encode-ffmpeg` and an interactive session on the target host.
+
+```text
+screendockd bench --duration-secs 60
+```
+
+Run it once on an idle desktop and once while the desktop is busy (for example playing a video). Record the full report text (frames and fps, wall time, CPU seconds and percentage of one core, wall time in capture and in encode), the host CPU model and core count, `ffmpeg -version` for the libx264 build, the session type, and the commit. See [encoding.md](encoding.md#cpu-measurement) for what the figure includes. The reported frame rate should stay near 25; a lower rate means the encoder does not keep up on that host.
+
+Status: requires measurement on the target host. No figures are recorded in this repository.
+
+## M6: streaming daemon
+
+Goal: confirm the full pipeline puts the live desktop on the panel with the heartbeat running. Needs the dock, permissions set up and a build with `--features encode-ffmpeg`.
+
+```text
+screendockd run
+```
+
+With the default config this captures the desktop, encodes at 1280x720, 25 fps, and writes to the discovered nodes until interrupted. Run for at least 10 minutes. Record:
+
+- The panel content: live desktop, partial picture, frozen picture, overlay or blank. Move a window and confirm it follows with the expected latency. Take a photo if possible.
+- The log: warn lines (write errors, capture errors), and the progress lines (frames, messages, write errors) every 5 seconds.
+- The summary printed on exit after Ctrl-C: frames, messages, keyframes, error counters, heartbeats.
+- Whether the panel recovers after unplugging and replugging the dock while `run` is active, or after sending the process SIGTERM and starting it again. After 100 consecutive failed frames the process exits with an error, so a supervisor (the shipped systemd user unit) is expected to restart it.
+- Any `dmesg` lines about the device.
+
+Exit criteria: the live desktop is visible and stays up for the whole run, shutdown with SIGINT and SIGTERM is clean (exit status 0), and a write failure does not stop the daemon while the failures are not continuous.
+
+Status: requires on-device validation.
+
+## M7: resolution picker
+
+Goal: confirm the panel accepts a configured size and renders it correctly. Needs the dock and the M6 setup. For each size below, set `display.width`, `display.height` and `display.orientation` in the config, run `screendockd run` for a few minutes and record what the panel shows:
+
+| `display.width` | `display.height` | `display.orientation` | Field B |
+|---|---|---|---|
+| 1280 | 720 | landscape | 327680 |
+| 900 | 600 | landscape | 230400 |
+| 720 | 1280 | portrait | 184320 |
+
+For each, record: whether the picture fills the panel, is cropped, letterboxed, stretched or rotated, whether the panel's own orientation changes, and any error from the tool. Also record whether a size not in the table (for example 1920x1080) is accepted and how it renders. Exit criterion: the native size renders correctly, and the result for every other size tried is written down, including failures.
+
+Status: requires on-device validation. The field B values come from the width and are unit tested; how the panel treats them is unverified.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:
@@ -92,6 +138,7 @@ The same commands run against regular files, which checks the tooling itself and
 touch /tmp/mi00 /tmp/mi01
 screendockd replay --mi01 /tmp/mi01 --iterations 5
 screendockd isolate --mode both --mi00 /tmp/mi00 --mi01 /tmp/mi01 --duration-secs 3
+screendockd run --mi00 /tmp/mi00 --mi01 /tmp/mi01 --h264-file test.h264 --max-frames 50
 ```
 
 The tools print a note when a node is not a character device. Timings from such runs are not hardware timings.

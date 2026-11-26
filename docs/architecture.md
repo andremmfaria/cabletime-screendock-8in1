@@ -16,7 +16,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 
 | Module | Role | Status |
 |---|---|---|
-| `discovery` | Resolves MI_00 and MI_01 hidraw paths from sysfs into the `Mi00Path` and `Mi01Path` newtypes | Implemented, unit tested against a synthetic sysfs tree |
+| `discovery` | Resolves MI_00 and MI_01 hidraw paths from sysfs into the `Mi00Path` and `Mi01Path` newtypes, matching the vendor and product IDs in `DeviceIds` (the dock's by default, overridable from the `[device]` config) | Implemented, unit tested against a synthetic sysfs tree |
 | `framing` | Pure functions and types for the 16-byte header, chunking and parsing: `ReportId`, `PixelWidth`, `FieldB`, `FrameHeader`, `MessageBuilder`, `frame_message`, `parse_chunks` | Implemented, unit and integration tested |
 | `hidraw_io` | `HidrawHandle`: owns one open node, writes chunks with `write(2)`, reads and parses messages | Implemented, loopback tested. Requires on-device validation |
 | `heartbeat` | Builds the JSON-RPC heartbeat message and runs a paced send loop on MI_00 | Implemented, loopback tested. Requires on-device validation |
@@ -24,7 +24,10 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `validation` | Replay timing and heartbeat isolation routines used by the CLI | Implemented, loopback tested. Requires on-device validation |
 | `utils::config` | Loads the TOML config through a four step path resolution | Implemented |
 | `utils::logging` | Initializes `tracing` from the config level or `RUST_LOG` | Implemented |
-| `encode` | H.264 encoder wrapper | Stub |
+| `encode` | `Encoder` trait, message policy (`messages_from_packet`), libx264 encoder (`encode::ffmpeg`, feature `encode-ffmpeg`), prerecorded test encoder (`encode::prerecorded`). See [encoding.md](encoding.md) | Implemented. libx264 verified in CI against the ffmpeg decoder; not compilable on hosts without libav development files. Requires on-device validation |
+| `display` | `DisplayGeometry`: validated width, height and orientation, field B | Implemented, unit tested |
+| `daemon` | Heartbeat thread plus capture, encode, frame and write loop with the error policy. See [daemon.md](daemon.md) | Implemented, tested against Xvfb and loopback files. Requires on-device validation |
+| `bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait, `create_backend` session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
 
 ## Layering rules
@@ -37,8 +40,8 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 
 ## Command line
 
-The binary provides `discover`, `replay`, `isolate` and `capture`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). The capture and encode daemon is not wired yet.
+The binary provides `discover`, `replay`, `isolate`, `capture`, `run` and `bench`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). `run` is the daemon, see [daemon.md](daemon.md). `bench` measures capture plus encode CPU time, see [encoding.md](encoding.md#cpu-measurement).
 
 ## Tests
 
-`cargo test` in `src/screendockd` runs unit tests and the `tests/framing.rs` integration tests. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`. No default test needs a dock or a hidraw node. The X11 capture test starts its own Xvfb and skips when Xvfb is not installed. See [testing.md](testing.md).
+`cargo test` in `src/screendockd` runs unit tests and the integration tests in `tests/` (framing, X11 capture, daemon end to end; with `--features encode-ffmpeg` also the libx264 encoder). Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`. No default test needs a dock or a hidraw node. The X11 capture and daemon tests start their own Xvfb and skip when Xvfb is not installed. See [testing.md](testing.md).
