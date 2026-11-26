@@ -148,6 +148,43 @@ For each, record: whether the picture fills the panel, is cropped, letterboxed, 
 
 Status: requires on-device validation. The header width and height are the configured values and are unit tested; how the panel treats sizes other than 1280x720 is unverified.
 
+## Live size changes
+
+Goal: confirm that `screendockd ctl set resolution` changes the picture size of a running daemon through the dock cycle, and that the panel shows each new size. Needs the dock, permissions set up, a running `screendockd run` and a build with `--features encode-ffmpeg`.
+
+Procedure:
+
+1. Start `RUST_LOG=info screendockd run` against the screen to mirror and wait until the log prints `session armed, video allowed`.
+2. Run `screendockd ctl set resolution 900x720`, then `screendockd ctl set resolution 640x360`, then `screendockd ctl set resolution 1280x720`, waiting for each command to print its answer before the next.
+3. Watch the panel during each change and write down the size you see, whether the picture fills the panel, is cropped, letterboxed or stretched, whether the Connecting screen appears, and how long the panel is blank.
+4. Stop the daemon with SIGINT and read the summary line.
+
+Expected observations: each command answers `applied (dock cycle)` after about 5 s with a silent dock. The log shows one `session armed, video allowed` line per change with `renegotiating` true, and the summary shows one more handshake than the number of changes (the initial one plus one per change), no session losses and no write errors. The panel shows the picture at the new size after each cycle.
+
+Measured on a real dock with the Rust session (X11 backend capturing a 1280x720 Xvfb, three consecutive changes to 900x720, 640x360 and 1280x720):
+
+- Each change answered `applied (dock cycle)`.
+- The daemon sent 2765 messages in 130 s with 0 write errors and 0 session losses, and counted 4 handshakes: 1 initial and 3 cycles.
+- The dock was silent: it sent no ready announcement and no replies, and `dock_alive` was false at each cycle. Each cycle took about 5 s end to end (two 1.5 s reply timeouts, the 0.8 s settle delay, and about 1 s for the encoder rebuild and verify), and the session re-armed as `AssumedActive` each time.
+
+Observed on the panel by the user during the same three changes, with a 1280x720 X11 source showing an xterm:
+
+- The panel flashed black and returned to the picture twice. Three changes were issued, so either one change showed no visible flash or two flashes merged.
+- The xterm text and window looked the same size on the panel after each change. Either the capture scales the whole 1280x720 source into the encoded size (mirror mode), or the panel scales the picture to fit; which of the two happens is unknown.
+- On some screen refreshes the text looked slightly blurred.
+
+Not measured: the picture size the panel actually used after each change, and the heartbeat gaps during the cycle. The cycle is verified by write success only, because a silent dock gives no reply to check. Sizes beyond the three above, orientation changes and a dock that replies to the cycle messages (after a replug) were not run. The black flashes are an observation by eye, not a timed measurement.
+
+Steps to verify the size the panel used:
+
+1. For each size, save a screenshot of the source (`xwd` or `import -window root`) right after the change.
+2. Capture the sent frames for the same size, by decoding the encoded output of the run with ffmpeg, and read the decoded width and height with `ffprobe`.
+3. Compare the decoded frame with the screenshot: if the xterm occupies the same fraction of the frame in both, the capture scales the source into the encoded size; if it occupies a different fraction or is cropped, it does not.
+4. Photograph the panel at each size and compare the xterm fraction of the panel with the decoded frame to tell whether the panel rescales.
+5. Repeat with the dock replugged so that it answers the cycle messages, and note whether the black flash count then matches the number of changes.
+
+Status: requires on-device validation of the picture size at each change.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:
