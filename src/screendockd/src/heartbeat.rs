@@ -55,7 +55,7 @@ pub fn heartbeat_payload(tick: u64) -> Vec<u8> {
     serde_json::to_vec(&message).expect("heartbeat JSON serialization is infallible")
 }
 
-/// Builds the wire-ready chunk sequence (Report ID 1, field B 0) for a given tick.
+/// Builds the wire-ready chunk sequence (Report ID 1, zero width and height) for a given tick.
 pub fn heartbeat_message(tick: u64) -> Vec<Vec<u8>> {
     MessageBuilder::control()
         .payload(&heartbeat_payload(tick))
@@ -116,7 +116,7 @@ pub fn run_heartbeat_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::framing::{parse_chunks, FieldB, REPORT_SIZE};
+    use crate::framing::{parse_chunks, PictureSize, REPORT_SIZE};
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom};
 
@@ -135,8 +135,7 @@ mod tests {
         assert_eq!(chunks[0].len(), REPORT_SIZE);
         let parsed = parse_chunks(&chunks).unwrap();
         assert_eq!(parsed.report_id, ReportId::Control);
-        assert_eq!(parsed.field_a, 0);
-        assert_eq!(parsed.field_b, FieldB::zero());
+        assert_eq!(parsed.size, PictureSize::zero());
         assert_eq!(parsed.payload, heartbeat_payload(1));
     }
 

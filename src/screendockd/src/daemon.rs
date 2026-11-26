@@ -225,7 +225,7 @@ fn video_loop(
 
         let mut frame_ok = true;
         for message in &messages {
-            let chunks = MessageBuilder::video(params.geometry.width())
+            let chunks = MessageBuilder::video(params.geometry.size())
                 .payload(message.as_bytes())
                 .build();
             match mi01.write_chunks(&chunks) {
@@ -275,7 +275,7 @@ mod tests {
     use crate::display::Orientation;
     use crate::encode::prerecorded::PrerecordedEncoder;
     use crate::encode::EncoderSettings;
-    use crate::framing::{parse_chunks, FieldB};
+    use crate::framing::{parse_chunks, PictureSize};
     use std::fs::OpenOptions;
     use std::io::{Read, Seek, SeekFrom};
 
@@ -371,7 +371,7 @@ mod tests {
         let mut kinds = Vec::new();
         for _ in 0..4 {
             let msg = reader.read_message().unwrap();
-            assert_eq!(msg.field_b, FieldB(327_680));
+            assert_eq!(msg.size, PictureSize::new(1280, 720));
             kinds.push(msg.payload[4] & 0x1F);
         }
         assert_eq!(kinds, [7, 1, 7, 1]);

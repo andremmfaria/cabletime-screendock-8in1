@@ -206,7 +206,7 @@ impl HidrawHandle {
             return Err(FramingError::HeaderTooShort { len: first.len() }.into());
         }
         let header = FrameHeader::from_bytes(&first)?;
-        let total_len = header.total_len as usize;
+        let total_len = header.payload_len as usize;
         let first_payload = total_len.min(FIRST_CHUNK_PAYLOAD_MAX);
         if first.len() < HEADER_SIZE + first_payload {
             first.resize(HEADER_SIZE + first_payload, 0);
@@ -218,8 +218,8 @@ impl HidrawHandle {
             let index = chunks.len();
             let mut chunk = self.read_chunk(index)?;
             let take = remaining.min(CONTINUATION_CHUNK_PAYLOAD_MAX);
-            if chunk.len() < 1 + take {
-                chunk.resize(1 + take, 0);
+            if chunk.len() < HEADER_SIZE + take {
+                chunk.resize(HEADER_SIZE + take, 0);
             }
             remaining -= take;
             chunks.push(chunk);
@@ -231,7 +231,7 @@ impl HidrawHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::framing::{frame_message, FieldB, MessageBuilder, PixelWidth};
+    use crate::framing::{frame_message, MessageBuilder, PictureSize};
     use std::io::{Seek, SeekFrom};
     use std::os::fd::OwnedFd;
 
@@ -258,7 +258,7 @@ mod tests {
         let mut handle = HidrawHandle::from_file(file, ReportId::Video);
 
         let data = payload(67_666);
-        let chunks = MessageBuilder::video(PixelWidth(1280))
+        let chunks = MessageBuilder::video(PictureSize::new(1280, 720))
             .payload(&data)
             .build();
         assert_eq!(chunks.len(), 17);
@@ -269,8 +269,7 @@ mod tests {
         handle.file_for_test().seek(SeekFrom::Start(0)).unwrap();
         let parsed = handle.read_message().unwrap();
         assert_eq!(parsed.report_id, ReportId::Video);
-        assert_eq!(parsed.field_a, 0);
-        assert_eq!(parsed.field_b, FieldB(327_680));
+        assert_eq!(parsed.size, PictureSize::new(1280, 720));
         assert_eq!(parsed.payload, data);
     }
 
@@ -288,7 +287,7 @@ mod tests {
             all
         });
 
-        let chunks = frame_message(ReportId::Control, 0, FieldB::zero(), &payload(9_000));
+        let chunks = frame_message(ReportId::Control, PictureSize::zero(), &payload(9_000));
         handle.write_chunks(&chunks).unwrap();
         drop(handle);
         let bytes = drain.join().unwrap();
@@ -327,7 +326,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (file, _) = scratch_file(&dir);
         let mut handle = HidrawHandle::from_file(file, ReportId::Video);
-        let chunks = MessageBuilder::video(PixelWidth(1280))
+        let chunks = MessageBuilder::video(PictureSize::new(1280, 720))
             .payload(&payload(9_000))
             .build();
         // Write only the first chunk of a 3-chunk message.

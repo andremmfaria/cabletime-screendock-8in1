@@ -1,26 +1,22 @@
 //! Resolution picker: validated panel geometry that drives the encode size, capture scaling and
-//! the video header's field B.
+//! the video header's width and height.
 //!
 //! `display.width`, `display.height` and `display.orientation` from the config are the encoded
 //! picture size exactly as written. Orientation is a consistency check on those numbers, not a
 //! rotation: a landscape picture is wider than tall, a portrait picture is taller than wide.
-//! Field B is `width * 256` of the encoded picture (see `framing::field_b_for_width`).
+//! The video header carries the encoded picture's width and height unchanged.
 
 use thiserror::Error;
 
-use crate::framing::{field_b_for_width, FieldB, PixelWidth};
+use crate::framing::{PictureSize, PixelHeight, PixelWidth};
 use crate::utils::config::DisplayConfig;
 
 /// Smallest accepted edge length in pixels (one H.264 macroblock).
 pub const MIN_DIMENSION: u32 = 16;
 
-/// Largest accepted edge length in pixels. Keeps `width * 256` far from `u32` overflow and
-/// within what Constrained Baseline encoders handle in practice.
+/// Largest accepted edge length in pixels, within what Constrained Baseline encoders handle in
+/// practice.
 pub const MAX_DIMENSION: u32 = 4096;
-
-/// Picture height in pixels. A distinct type from [`PixelWidth`] so the two cannot be swapped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PixelHeight(pub u32);
 
 /// Orientation of the encoded picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,9 +119,12 @@ impl DisplayGeometry {
         self.orientation
     }
 
-    /// Header field B for video messages at this width.
-    pub fn field_b(&self) -> FieldB {
-        field_b_for_width(self.width)
+    /// The width and height carried in the header of every video message.
+    pub fn size(&self) -> PictureSize {
+        PictureSize {
+            width: self.width,
+            height: self.height,
+        }
     }
 }
 
@@ -134,14 +133,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn field_b_for_native_900_and_portrait_sizes() {
+    fn header_size_is_width_and_height_for_native_900_and_portrait_sizes() {
         let native = DisplayGeometry::new(1280, 720, Orientation::Landscape).unwrap();
-        assert_eq!(native.field_b(), FieldB(327_680));
+        assert_eq!(native.size(), PictureSize::new(1280, 720));
         let narrow = DisplayGeometry::new(900, 600, Orientation::Landscape).unwrap();
-        assert_eq!(narrow.field_b(), FieldB(230_400));
-        // Portrait: field B follows the (narrow) width, 720 * 256.
+        assert_eq!(narrow.size(), PictureSize::new(900, 600));
         let portrait = DisplayGeometry::new(720, 1280, Orientation::Portrait).unwrap();
-        assert_eq!(portrait.field_b(), FieldB(184_320));
+        assert_eq!(portrait.size(), PictureSize::new(720, 1280));
         assert_eq!(portrait.width(), PixelWidth(720));
         assert_eq!(portrait.height(), PixelHeight(1280));
     }
@@ -194,8 +192,8 @@ mod tests {
             orientation: "landscape".into(),
         };
         assert_eq!(
-            DisplayGeometry::from_config(&cfg).unwrap().field_b(),
-            FieldB(327_680)
+            DisplayGeometry::from_config(&cfg).unwrap().size(),
+            PictureSize::new(1280, 720)
         );
     }
 }

@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::framing::{MessageBuilder, PixelWidth, ReportId};
+use crate::framing::{MessageBuilder, PictureSize, ReportId};
 use crate::heartbeat::{run_heartbeat_loop, HeartbeatError, HeartbeatStats};
 use crate::hidraw_io::{HidrawHandle, HidrawIoError};
 
@@ -178,8 +178,8 @@ impl fmt::Display for ReplayReport {
     }
 }
 
-fn video_chunks(width: PixelWidth, message: &[u8]) -> Vec<Vec<u8>> {
-    MessageBuilder::video(width).payload(message).build()
+fn video_chunks(size: PictureSize, message: &[u8]) -> Vec<Vec<u8>> {
+    MessageBuilder::video(size).payload(message).build()
 }
 
 fn require_video(handle: &HidrawHandle) -> Result<(), ValidationError> {
@@ -196,7 +196,7 @@ fn require_video(handle: &HidrawHandle) -> Result<(), ValidationError> {
 /// between its chunks and none between messages, recording per-chunk timing.
 pub fn run_replay(
     handle: &mut HidrawHandle,
-    width: PixelWidth,
+    size: PictureSize,
     messages: &[Vec<u8>],
     iterations: usize,
 ) -> Result<ReplayReport, ValidationError> {
@@ -206,7 +206,7 @@ pub fn run_replay(
             "replay needs at least one message and one iteration".into(),
         ));
     }
-    let framed: Vec<Vec<Vec<u8>>> = messages.iter().map(|m| video_chunks(width, m)).collect();
+    let framed: Vec<Vec<Vec<u8>>> = messages.iter().map(|m| video_chunks(size, m)).collect();
 
     let mut chunk_samples = Vec::new();
     let mut message_samples = Vec::new();
@@ -255,7 +255,7 @@ pub struct IsolateParams {
     pub mode: IsolateMode,
     pub duration: Duration,
     pub heartbeat_interval: Duration,
-    pub width: PixelWidth,
+    pub size: PictureSize,
     pub fps: u32,
     /// One looped group of pictures: element 0 must be the keyframe bundle, the rest
     /// inter-frames. The loop restarts at the keyframe each time it wraps.
@@ -321,12 +321,12 @@ struct VideoOutcome {
 
 fn run_video_paced(
     handle: &mut HidrawHandle,
-    width: PixelWidth,
+    size: PictureSize,
     gop: &[Vec<u8>],
     fps: u32,
     duration: Duration,
 ) -> Result<VideoOutcome, ValidationError> {
-    let framed: Vec<Vec<Vec<u8>>> = gop.iter().map(|m| video_chunks(width, m)).collect();
+    let framed: Vec<Vec<Vec<u8>>> = gop.iter().map(|m| video_chunks(size, m)).collect();
     let frame_period = Duration::from_secs_f64(1.0 / f64::from(fps));
     let never_stop = AtomicBool::new(false);
     let start = Instant::now();
@@ -391,7 +391,7 @@ pub fn run_isolate(
         let video = match mi01 {
             Some(handle) => run_video_paced(
                 handle,
-                params.width,
+                params.size,
                 &params.gop,
                 params.fps,
                 params.duration,
@@ -457,7 +457,7 @@ mod tests {
     fn synthetic_messages_have_research_sizes_and_chunk_counts() {
         assert_eq!(synthetic_keyframe_bundle().len(), 3577);
         assert_eq!(synthetic_interframe().len(), 67_666);
-        let chunks = video_chunks(PixelWidth(1280), &synthetic_interframe());
+        let chunks = video_chunks(PictureSize::new(1280, 720), &synthetic_interframe());
         assert_eq!(chunks.len(), 17);
         assert_eq!(
             parse_chunks(&chunks).unwrap().payload,
@@ -482,7 +482,7 @@ mod tests {
     fn replay_writes_keyframe_plus_seventeen_chunks_and_reports_timing() {
         let (mut handle, dir) = loopback(ReportId::Video);
         let messages = vec![synthetic_keyframe_bundle(), synthetic_interframe()];
-        let report = run_replay(&mut handle, PixelWidth(1280), &messages, 2).unwrap();
+        let report = run_replay(&mut handle, PictureSize::new(1280, 720), &messages, 2).unwrap();
         assert_eq!(report.messages_sent, 4);
         assert_eq!(report.chunks_sent, 2 * (1 + 17));
         assert_eq!(report.chunk_stats.as_ref().unwrap().count, 36);
@@ -499,10 +499,10 @@ mod tests {
     #[test]
     fn replay_rejects_control_handle_and_empty_input() {
         let (mut control, _d) = loopback(ReportId::Control);
-        assert!(run_replay(&mut control, PixelWidth(1280), &[vec![1]], 1).is_err());
+        assert!(run_replay(&mut control, PictureSize::new(1280, 720), &[vec![1]], 1).is_err());
         let (mut video, _d2) = loopback(ReportId::Video);
-        assert!(run_replay(&mut video, PixelWidth(1280), &[], 1).is_err());
-        assert!(run_replay(&mut video, PixelWidth(1280), &[vec![1]], 0).is_err());
+        assert!(run_replay(&mut video, PictureSize::new(1280, 720), &[], 1).is_err());
+        assert!(run_replay(&mut video, PictureSize::new(1280, 720), &[vec![1]], 0).is_err());
     }
 
     fn params(mode: IsolateMode) -> IsolateParams {
@@ -510,7 +510,7 @@ mod tests {
             mode,
             duration: Duration::from_millis(300),
             heartbeat_interval: Duration::from_millis(50),
-            width: PixelWidth(1280),
+            size: PictureSize::new(1280, 720),
             fps: 25,
             gop: vec![synthetic_keyframe_bundle(), vec![0, 0, 0, 1, 0x41, 1, 2, 3]],
         }

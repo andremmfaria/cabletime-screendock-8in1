@@ -15,8 +15,8 @@ The command line option `--config PATH` bypasses this order and loads that file 
 
 | Key | Type | Default | Used by |
 |---|---|---|---|
-| `display.width` | integer | 1280 | Encoded picture width in pixels; sets header field B (`width * 256`) for video and the encoder output width. Passed to the Wayland backend as the preferred stream width. Overridable per run with `--width` for `replay` and `isolate`. Even, 16 to 4096 |
-| `display.height` | integer | 720 | Encoded picture height in pixels; the encoder output height and the Wayland preferred stream height. Even, 16 to 4096 |
+| `display.width` | integer | 1280 | Encoded picture width in pixels; written into the header of every video message and used as the encoder output width. Passed to the Wayland backend as the preferred stream width. Overridable per run with `--width` for `replay` and `isolate`. Even, 16 to 4096 |
+| `display.height` | integer | 720 | Encoded picture height in pixels; the header height of every video message, the encoder output height and the Wayland preferred stream height. Even, 16 to 4096 |
 | `display.orientation` | string | `landscape` | `landscape` (width at least height) or `portrait` (height at least width). Checked against the size; not a rotation. See [daemon.md](daemon.md#resolution) |
 | `encode.bitrate_kbps` | integer | 4000 | libx264 target bit rate in kilobits per second |
 | `encode.keyframe_interval` | integer | 50 | Frames between keyframes |
@@ -53,7 +53,8 @@ bench   [--h264-file PATH] [--backend auto|x11|wayland] [--duration-secs N]
 | Option | Default | Meaning |
 |---|---|---|
 | `--mi00`, `--mi01` | discovered | Use this path instead of sysfs discovery for that node. A regular file works for dry runs |
-| `--width` | `display.width` | Target width in pixels for field B |
+| `--width` | `display.width` | Picture width in pixels for the video header |
+| `--height` | `display.height` | Picture height in pixels for the video header |
 | `--h264-file` | synthetic messages for `replay` and `isolate`; libx264 for `run` and `bench` | Annex-B H.264 file to send instead of filler messages (`replay`, `isolate`), or to replay through the test encoder instead of libx264 (`run`, `bench`) |
 | `--iterations` | 20 | Times `replay` repeats its message set |
 | `--mode` | required | `isolate` condition |

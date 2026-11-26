@@ -30,7 +30,7 @@ use screendockd::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use screendockd::discovery::{discover_configured, DeviceIds, Mi00Path, Mi01Path};
 use screendockd::display::DisplayGeometry;
 use screendockd::encode::{create_encoder, EncoderKind, EncoderSettings};
-use screendockd::framing::PixelWidth;
+use screendockd::framing::PictureSize;
 use screendockd::hidraw_io::HidrawHandle;
 use screendockd::utils::config::{self, CaptureBackendChoice, Config};
 use screendockd::utils::logging::init_logging;
@@ -154,9 +154,13 @@ struct NodeArgs {
 
 #[derive(Debug, Args)]
 struct StreamArgs {
-    /// Target width in pixels for header field B. Defaults to the configured display width.
+    /// Picture width in pixels for the video header. Defaults to the configured display width.
     #[arg(long)]
     width: Option<u32>,
+    /// Picture height in pixels for the video header. Defaults to the configured display
+    /// height.
+    #[arg(long)]
+    height: Option<u32>,
     /// Annex-B H.264 file (for example from ffmpeg `-f h264`) to send instead of synthetic
     /// filler messages. Required for the panel to show a real picture.
     #[arg(long, value_name = "PATH")]
@@ -275,11 +279,12 @@ fn geometry(config: &Config) -> Result<DisplayGeometry> {
     DisplayGeometry::from_config(&config.display).context("invalid [display] settings")
 }
 
-fn width_for(stream: &StreamArgs, config: &Config) -> Result<PixelWidth> {
-    match stream.width {
-        Some(width) => Ok(PixelWidth(width)),
-        None => Ok(geometry(config)?.width()),
-    }
+fn size_for(stream: &StreamArgs, config: &Config) -> Result<PictureSize> {
+    let configured = geometry(config)?.size();
+    Ok(PictureSize::new(
+        stream.width.unwrap_or(configured.width.0),
+        stream.height.unwrap_or(configured.height.0),
+    ))
 }
 
 fn device_ids(config: &Config) -> Result<DeviceIds> {
@@ -315,14 +320,14 @@ fn main() -> Result<()> {
             let messages = load_messages(&args.stream)?;
             warn_if_not_char_device(&mi01);
             let mut handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
-            let width = width_for(&args.stream, &config)?;
+            let size = size_for(&args.stream, &config)?;
             println!(
                 "replaying {} message(s) x {} iteration(s) to {}",
                 messages.len(),
                 args.iterations,
                 mi01.display()
             );
-            let report = run_replay(&mut handle, width, &messages, args.iterations)
+            let report = run_replay(&mut handle, size, &messages, args.iterations)
                 .context("replay failed")?;
             println!("{report}");
         }
@@ -364,7 +369,7 @@ fn main() -> Result<()> {
                 mode,
                 duration: Duration::from_secs(args.duration_secs),
                 heartbeat_interval: Duration::from_millis(config.daemon.heartbeat_interval_ms),
-                width: width_for(&args.stream, &config)?,
+                size: size_for(&args.stream, &config)?,
                 fps: args.fps,
                 gop,
             };

@@ -7,15 +7,13 @@
 //! content validation. Exact byte offsets/values asserted below come directly from the
 //! documented wire layout, not guessed.
 //!
-//! Updated for the Design Patterns newtype/builder refactor (see
-//! `docs/implementation-plan.md`'s Design Patterns section): `report_id`/`field_b` are now
-//! `ReportId`/`FieldB` values rather than bare `u8`/`u32`, and `PixelWidth` wraps the raw pixel
-//! count passed to `field_b_for_width`. The underlying byte-level assertions (exact header
-//! offsets, exact chunk counts, exact payload placement, exact zero-padding) are unchanged.
+//! Layout under test: every report starts with a 16-byte header. The first report carries the
+//! payload length (bytes 1..4), width (bytes 8..11) and height (bytes 12..15); continuation
+//! reports carry the Report ID followed by 15 zero bytes. Payload bytes start at offset 16.
 
 use screendockd::framing::{
-    field_b_for_width, frame_message, parse_chunks, FieldB, PixelWidth, ReportId,
-    CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, REPORT_SIZE,
+    frame_message, parse_chunks, FramingError, MessageBuilder, PictureSize, ReportId,
+    CONTINUATION_CHUNK_PAYLOAD_MAX, FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE, REPORT_SIZE,
 };
 
 /// Builds one Annex-B NAL unit: a 4-byte start code, a 1-byte NAL header
@@ -27,182 +25,146 @@ fn nal(nal_type: u8, nal_ref_idc: u8, body_len: usize) -> Vec<u8> {
     v
 }
 
-/// A real keyframe-bundle shape per the research doc: SPS (type 7) + PPS (type 8) + SEI (type 6)
-/// + IDR slice (type 5) concatenated as one message, sized to exactly 3577 bytes total so this
-///   matches the research's documented fixture length precisely.
+/// A keyframe-bundle shape: SPS (type 7) + PPS (type 8) + SEI (type 6) + IDR slice (type 5)
+/// concatenated as one message of exactly 3577 bytes.
 fn keyframe_bundle_3577_bytes() -> Vec<u8> {
-    let sps = nal(7, 3, 25); // 4 + 1 + 25 = 30 bytes
-    let pps = nal(8, 3, 7); // 4 + 1 + 7  = 12 bytes
-    let sei = nal(6, 0, 15); // 4 + 1 + 15 = 20 bytes
-    let idr = nal(5, 3, 3510); // 4 + 1 + 3510 = 3515 bytes
     let mut payload = Vec::new();
-    payload.extend(sps);
-    payload.extend(pps);
-    payload.extend(sei);
-    payload.extend(idr);
+    payload.extend(nal(7, 3, 25));
+    payload.extend(nal(8, 3, 7));
+    payload.extend(nal(6, 0, 15));
+    payload.extend(nal(5, 3, 3510));
     assert_eq!(payload.len(), 3577, "fixture construction sanity check");
     payload
 }
 
-/// A single-NAL inter-frame shape, sized to exactly 67666 bytes total, matching the research
-/// doc's documented 17-chunk fixture length precisely.
+/// A single-NAL inter-frame shape of exactly 67666 bytes.
 fn inter_frame_67666_bytes() -> Vec<u8> {
-    let payload = nal(1, 2, 67661); // 4 + 1 + 67661 = 67666 bytes
+    let payload = nal(1, 2, 67661);
     assert_eq!(payload.len(), 67666, "fixture construction sanity check");
     payload
 }
 
-/// A plausible MI_00 heartbeat JSON-RPC payload (exact JSON content doesn't need to match a
-/// captured one byte-for-byte per the task brief — just well-formed JSON of the documented
-/// shape from `docs/research/full-protocol-spec-2026-11-21.md`'s MI_00 section).
 fn heartbeat_payload() -> Vec<u8> {
-    br#"{"jsonrpc":"2.0","method":"heartbeat","params":{"session-id":"1"}}"#.to_vec()
+    br#"{"jsonrpc":"2.0", "method": "heartbeat", "params": {"session-id": "25282281"}}"#.to_vec()
 }
 
 #[test]
-fn single_chunk_keyframe_bundle_matches_documented_byte_layout() {
+fn single_report_keyframe_bundle_matches_documented_byte_layout() {
     let payload = keyframe_bundle_3577_bytes();
-    let field_b = field_b_for_width(PixelWidth(1280));
-    assert_eq!(
-        field_b,
-        FieldB(327_680),
-        "baseline 1280-wide field B per the research doc"
-    );
+    let chunks = frame_message(ReportId::Video, PictureSize::new(1280, 720), &payload);
 
-    let chunks = frame_message(ReportId::Video, 0, field_b, &payload);
-
-    // 3577 < 4080 (FIRST_CHUNK_PAYLOAD_MAX): must fit in exactly one chunk.
+    // 3577 < 4080: exactly one report.
     assert_eq!(chunks.len(), 1);
     let chunk = &chunks[0];
     assert_eq!(chunk.len(), REPORT_SIZE);
 
-    // Header bytes, asserted at their exact documented offsets.
     assert_eq!(chunk[0], 2, "Report ID");
-    assert_eq!(&chunk[1..5], &3577u32.to_be_bytes(), "total message length");
-    assert_eq!(&chunk[5..9], &0u32.to_be_bytes(), "field A");
-    assert_eq!(&chunk[9..13], &327_680u32.to_be_bytes(), "field B");
-    assert_eq!(&chunk[13..16], &[0, 0, 0], "zero padding");
-
-    // Payload bytes start at offset 16 and match the original fixture exactly.
+    assert_eq!(&chunk[1..5], &3577u32.to_be_bytes(), "payload length");
+    assert_eq!(&chunk[5..8], &[0, 0, 0], "bytes 5..7 are zero");
+    assert_eq!(&chunk[8..12], &1280u32.to_be_bytes(), "width");
+    assert_eq!(&chunk[12..16], &720u32.to_be_bytes(), "height");
     assert_eq!(&chunk[16..16 + 3577], payload.as_slice());
-
-    // Everything past the real payload, out to the fixed 4096-byte report size, is zero.
     assert!(chunk[16 + 3577..].iter().all(|&b| b == 0));
 
-    // Round-trip back through parse_chunks.
     let parsed = parse_chunks(&chunks).unwrap();
     assert_eq!(parsed.report_id, ReportId::Video);
-    assert_eq!(parsed.field_a, 0);
-    assert_eq!(parsed.field_b, FieldB(327_680));
+    assert_eq!(parsed.size, PictureSize::new(1280, 720));
     assert_eq!(parsed.payload, payload);
 }
 
 #[test]
-fn multi_chunk_inter_frame_requires_exactly_seventeen_chunks() {
+fn multi_report_inter_frame_requires_exactly_seventeen_reports() {
     let payload = inter_frame_67666_bytes();
-    let field_b = field_b_for_width(PixelWidth(1280));
+    let chunks = frame_message(ReportId::Video, PictureSize::new(1280, 720), &payload);
+    assert_eq!(chunks.len(), 17);
 
-    let chunks = frame_message(ReportId::Video, 0, field_b, &payload);
-
-    // 4080 (first chunk) + 16 * 4095 (if all continuation chunks were full) would be 69,  520
-    // bytes of capacity; the documented fixture needs exactly 17 chunks total (1 first +
-    // 16 continuation), with the last continuation chunk partially filled. Verify the exact
-    // split: first chunk carries FIRST_CHUNK_PAYLOAD_MAX (4080) bytes, then 15 full 4095-byte
-    // continuation chunks, then one final continuation chunk with the remainder.
-    let expected_total_chunks = 17;
-    assert_eq!(chunks.len(), expected_total_chunks);
-
+    // 4080 bytes in the first report, then 15 full 4080-byte continuations, then 2386.
     let remaining_after_first = payload.len() - FIRST_CHUNK_PAYLOAD_MAX;
-    let full_continuation_chunks = remaining_after_first / CONTINUATION_CHUNK_PAYLOAD_MAX;
-    let last_chunk_payload_len = remaining_after_first % CONTINUATION_CHUNK_PAYLOAD_MAX;
-    assert_eq!(full_continuation_chunks, 15);
-    assert_eq!(last_chunk_payload_len, 2161);
+    assert_eq!(remaining_after_first / CONTINUATION_CHUNK_PAYLOAD_MAX, 15);
+    let last_len = remaining_after_first % CONTINUATION_CHUNK_PAYLOAD_MAX;
+    assert_eq!(last_len, 2386);
 
-    // First chunk: header + exactly FIRST_CHUNK_PAYLOAD_MAX payload bytes.
     let first = &chunks[0];
-    assert_eq!(first.len(), REPORT_SIZE);
     assert_eq!(first[0], 2);
     assert_eq!(&first[1..5], &67666u32.to_be_bytes());
-    assert_eq!(&first[9..13], &327_680u32.to_be_bytes());
+    assert_eq!(&first[8..12], &1280u32.to_be_bytes());
+    assert_eq!(&first[12..16], &720u32.to_be_bytes());
     assert_eq!(
         &first[16..16 + FIRST_CHUNK_PAYLOAD_MAX],
         &payload[0..FIRST_CHUNK_PAYLOAD_MAX]
     );
 
-    // A full continuation chunk (index 1): 1-byte Report ID + 4095 raw payload bytes, no header.
-    let cont1 = &chunks[1];
-    assert_eq!(cont1.len(), REPORT_SIZE);
-    assert_eq!(
-        cont1[0], 2,
-        "continuation chunk still carries the Report ID byte"
-    );
-    let expected_slice =
-        &payload[FIRST_CHUNK_PAYLOAD_MAX..FIRST_CHUNK_PAYLOAD_MAX + CONTINUATION_CHUNK_PAYLOAD_MAX];
-    assert_eq!(
-        &cont1[1..1 + CONTINUATION_CHUNK_PAYLOAD_MAX],
-        expected_slice
-    );
-
-    // The final (17th) chunk: partially filled (2161 payload bytes), zero-padded tail.
+    // Every continuation report: Report ID, 15 zero bytes, then up to 4080 payload bytes.
+    for (i, chunk) in chunks.iter().enumerate().skip(1) {
+        assert_eq!(chunk.len(), REPORT_SIZE);
+        assert_eq!(chunk[0], 2, "continuation {i} Report ID");
+        assert!(chunk[1..HEADER_SIZE].iter().all(|&b| b == 0), "chunk {i}");
+        let start = FIRST_CHUNK_PAYLOAD_MAX + (i - 1) * CONTINUATION_CHUNK_PAYLOAD_MAX;
+        let end = (start + CONTINUATION_CHUNK_PAYLOAD_MAX).min(payload.len());
+        assert_eq!(
+            &chunk[HEADER_SIZE..HEADER_SIZE + (end - start)],
+            &payload[start..end]
+        );
+    }
     let last = chunks.last().unwrap();
-    assert_eq!(last.len(), REPORT_SIZE);
-    assert_eq!(last[0], 2);
-    let last_payload_start = payload.len() - last_chunk_payload_len;
-    assert_eq!(
-        &last[1..1 + last_chunk_payload_len],
-        &payload[last_payload_start..]
-    );
-    assert!(last[1 + last_chunk_payload_len..].iter().all(|&b| b == 0));
+    assert!(last[HEADER_SIZE + last_len..].iter().all(|&b| b == 0));
 
-    // Round-trip back through parse_chunks.
     let parsed = parse_chunks(&chunks).unwrap();
-    assert_eq!(parsed.report_id, ReportId::Video);
-    assert_eq!(parsed.field_a, 0);
-    assert_eq!(parsed.field_b, FieldB(327_680));
+    assert_eq!(parsed.size, PictureSize::new(1280, 720));
     assert_eq!(parsed.payload, payload);
 }
 
 #[test]
-fn mi00_heartbeat_control_message_is_single_chunk_report_id_one() {
+fn exact_multiples_of_the_payload_capacity_do_not_add_an_empty_report() {
+    let payload = vec![0x11u8; FIRST_CHUNK_PAYLOAD_MAX + CONTINUATION_CHUNK_PAYLOAD_MAX];
+    let chunks = frame_message(ReportId::Video, PictureSize::new(64, 64), &payload);
+    assert_eq!(chunks.len(), 2);
+    assert_eq!(parse_chunks(&chunks).unwrap().payload, payload);
+    let one_over = vec![0x11u8; FIRST_CHUNK_PAYLOAD_MAX + 1];
+    assert_eq!(
+        frame_message(ReportId::Video, PictureSize::new(64, 64), &one_over).len(),
+        2
+    );
+}
+
+#[test]
+fn mi00_control_message_is_one_report_with_zero_width_and_height() {
     let payload = heartbeat_payload();
-    // MI_00 control channel: field B's semantics are video-specific (width * 256) per the
-    // research doc; for a non-video control message there's no documented meaning for field B,
-    // so this test uses FieldB::zero() as the structurally sensible default — field A is always
-    // 0 regardless of channel per the research doc's live-tested finding.
-    let chunks = frame_message(ReportId::Control, 0, FieldB::zero(), &payload);
+    let chunks = MessageBuilder::control().payload(&payload).build();
 
     assert_eq!(chunks.len(), 1);
     let chunk = &chunks[0];
-    assert_eq!(chunk[0], 1, "MI_00 Report ID is 1 (interface_number + 1)");
+    assert_eq!(chunk[0], 1, "MI_00 Report ID is 1");
     assert_eq!(&chunk[1..5], &(payload.len() as u32).to_be_bytes());
-    assert_eq!(&chunk[9..13], &0u32.to_be_bytes());
+    assert_eq!(
+        &chunk[5..16],
+        &[0u8; 11],
+        "bytes 5..15 are zero for control"
+    );
     assert_eq!(&chunk[16..16 + payload.len()], payload.as_slice());
 
     let parsed = parse_chunks(&chunks).unwrap();
     assert_eq!(parsed.report_id, ReportId::Control);
+    assert_eq!(parsed.size, PictureSize::zero());
     assert_eq!(parsed.payload, payload);
-    // Sanity check this is well-formed JSON of the documented heartbeat shape.
-    let text = std::str::from_utf8(&parsed.payload).unwrap();
-    assert!(text.contains(r#""method":"heartbeat""#));
-    assert!(text.contains(r#""jsonrpc":"2.0""#));
 }
 
 #[test]
-fn message_builder_video_entry_point_matches_frame_message_byte_for_byte() {
-    // Confirms MessageBuilder::video(...) (Design Patterns pattern 3) produces exactly the same
-    // wire bytes frame_message does when fed the equivalent arguments directly — the builder is
-    // an ergonomic/type-safety wrapper, not a behavior change.
-    use screendockd::framing::MessageBuilder;
-
+fn builder_video_matches_frame_message_byte_for_byte() {
     let payload = keyframe_bundle_3577_bytes();
-    let via_builder = MessageBuilder::video(PixelWidth(1280))
-        .payload(&payload)
-        .build();
-    let via_frame_message = frame_message(
-        ReportId::Video,
-        0,
-        field_b_for_width(PixelWidth(1280)),
-        &payload,
+    let size = PictureSize::new(900, 720);
+    let via_builder = MessageBuilder::video(size).payload(&payload).build();
+    assert_eq!(via_builder, frame_message(ReportId::Video, size, &payload));
+}
+
+#[test]
+fn packed_report_layout_without_continuation_header_is_rejected() {
+    // A continuation laid out as Report ID plus payload (no zero header) must not parse.
+    let payload = inter_frame_67666_bytes();
+    let mut chunks = frame_message(ReportId::Video, PictureSize::new(1280, 720), &payload);
+    chunks[1][1] = 0xAA;
+    assert_eq!(
+        parse_chunks(&chunks).unwrap_err(),
+        FramingError::NonZeroContinuationHeader { index: 1 }
     );
-    assert_eq!(via_builder, via_frame_message);
 }

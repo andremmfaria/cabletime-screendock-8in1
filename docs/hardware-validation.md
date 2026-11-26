@@ -1,8 +1,13 @@
 # Hardware validation
 
-Status: requires on-device validation. Everything here is implemented and passes loopback tests against files and pipes, which say nothing about the dock's timing or rendering. The procedures below are run by a person with the dock attached. Results are recorded by the person running them; none are recorded in this repository yet.
+Status: partially validated on a real dock; the procedures below still require a person with the dock attached. Loopback tests against files and pipes say nothing about the dock's timing or rendering. Measurements from the procedures below are recorded by the person running them; none are recorded in this repository yet.
 
 Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation), the M5 CPU criterion, M6 (the streaming daemon) and M7 (resolution picker).
+
+## Verified on a real dock
+
+- Report layout: every continuation report of a multi-report message carries a full 16-byte header (Report ID, then 15 zero bytes) followed by up to 4080 payload bytes. A looped H.264 test stream sent with this layout, with the picture width and height in header bytes 8 to 11 and 12 to 15, rendered a picture on the panel. This was confirmed with a Python prototype that writes the same byte layout as `framing.rs`; the Rust build has not been run against the dock.
+- Known open item: tearing is visible on fast motion and is being examined.
 
 ## Preparation
 
@@ -19,7 +24,7 @@ Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation
    This gives a keyframe every 25 frames and no B-frames. `screendockd` splits it into one keyframe bundle (SPS, PPS, SEI, IDR) followed by single-NAL inter-frames.
 6. Record the host: CPU model, USB port type (USB 2, 3.x, direct or through a hub), and the `git rev-parse --short HEAD` of the build.
 
-Without `--h264-file` the tools send synthetic filler messages: a 3577 byte keyframe-shaped message and a 67,666 byte (17 chunk) inter-frame-shaped message with the documented sizes and NAL layout. They are valid for timing and are not decodable video, so they will not produce a picture.
+Without `--h264-file` the tools send synthetic filler messages: a 3577 byte keyframe-shaped message and a 67,666 byte (17 report) inter-frame-shaped message with the documented sizes and NAL layout. They are valid for timing and are not decodable video, so they will not produce a picture.
 
 ## M2: native write timing
 
@@ -120,15 +125,15 @@ Status: requires on-device validation.
 
 Goal: confirm the panel accepts a configured size and renders it correctly. Needs the dock and the M6 setup. For each size below, set `display.width`, `display.height` and `display.orientation` in the config, run `screendockd run` for a few minutes and record what the panel shows:
 
-| `display.width` | `display.height` | `display.orientation` | Field B |
-|---|---|---|---|
-| 1280 | 720 | landscape | 327680 |
-| 900 | 600 | landscape | 230400 |
-| 720 | 1280 | portrait | 184320 |
+| `display.width` | `display.height` | `display.orientation` |
+|---|---|---|
+| 1280 | 720 | landscape |
+| 900 | 600 | landscape |
+| 720 | 1280 | portrait |
 
 For each, record: whether the picture fills the panel, is cropped, letterboxed, stretched or rotated, whether the panel's own orientation changes, and any error from the tool. Also record whether a size not in the table (for example 1920x1080) is accepted and how it renders. Exit criterion: the native size renders correctly, and the result for every other size tried is written down, including failures.
 
-Status: requires on-device validation. The field B values come from the width and are unit tested; how the panel treats them is unverified.
+Status: requires on-device validation. The header width and height are the configured values and are unit tested; how the panel treats sizes other than 1280x720 is unverified.
 
 ## Dry runs without a dock
 
