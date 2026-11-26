@@ -199,6 +199,27 @@ Expected: `dock`, `HDMI Extender`, `1920x1080@60` and the six modes `1920x1080@6
 
 The parser and the fake dock cover this path with the captured bytes. Status: requires on-device validation of the cache file written by the Rust daemon and of the reported values on a cold start.
 
+## Xorg with the dummy driver
+
+Validated on the development host (Ubuntu 26.04, Intel JasperLake UHD with the `i915` kernel driver, no desktop session) with a rootless Xorg and the dummy driver. The server starts as the ordinary user, without a virtual terminal:
+
+```text
+/usr/lib/xorg/Xorg -config dummy.conf -configdir <empty dir> -noreset -logfile xorg.log -sharevts -novtswitch -keeptty -ac -nolisten tcp :N
+```
+
+The config has one `Device` with `Driver "dummy"` and `VideoRam 256000`, one `Monitor` with a single 1280x720 modeline, one `Screen` with `Virtual 4096 2160` and `ServerFlags` `AutoAddDevices`, `AutoEnableDevices` and `AutoAddGPU` set to `false`. `xrandr` 1.5.3 reports RandR 1.6.
+
+| Check | Result |
+|---|---|
+| Outputs | `DUMMY0` connected and active, `DUMMY1` to `DUMMY15` disconnected, each with one usable CRTC |
+| `xrandr --fb 6000x3000` | accepted, larger than the configured `Virtual` size |
+| `xrandr --setmonitor VMON 1280/300x720/170+2720+0 none` | accepted and listed by `--listmonitors` |
+| `--newmode`, `--addmode DUMMY1`, `--output DUMMY1 --mode ... --pos 1280x0` | `DUMMY1` becomes a connected output and a listed monitor at the position |
+| Turning `DUMMY1` off, `--delmode`, `--rmmode` | the monitor disappears and the layout returns to one monitor |
+| Two `Device` sections in one layout | two separate X screens, each with its own `DUMMY0`; not a second output on one screen |
+
+The `modesetting` driver on the i915 GPU cannot start without root here: Xorg reports `Cannot open /dev/tty0 (Permission denied)`, and `/dev/dri/card0` is `root:video` with mode 0660. Status: requires validation on a machine with a logged in X11 session and a real GPU driver.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:

@@ -14,7 +14,7 @@ CI runs the same checks, plus a clippy run with `--features capture-wayland` aft
 
 ## Test groups
 
-The integration tests are grouped by area, one test target per group: `cargo test --test protocol`, `cargo test --test session`, `cargo test --test capture`, `cargo test --test e2e` and `cargo test --test encode --features encode-ffmpeg`. The `capture` and `e2e` groups share the Xvfb and X11 painter helpers in `tests/support/`.
+The integration tests are grouped by area, one test target per group: `cargo test --test protocol`, `cargo test --test session`, `cargo test --test capture`, `cargo test --test e2e` and `cargo test --test encode --features encode-ffmpeg`. The `capture` and `e2e` groups share the Xvfb, Xorg and X11 painter helpers in `tests/support/`.
 
 ## Capture, Stage 1: Xvfb
 
@@ -43,6 +43,19 @@ DISPLAY=:99 cargo run -- capture --backend x11 --frames 3 --out-dir /tmp/capture
 ```
 
 The PNG files show the empty Xvfb root window; paint something first (for example with `xsetroot -solid red`) to see content.
+
+## Capture, Stage 1: Xorg with the dummy driver
+
+`tests/support/xorg.rs` starts a rootless Xorg with the dummy video driver on a free display number between 100 and 499, with a generated config and log in a temporary directory: one 1280x720 screen with a declared framebuffer of 4096x2160, no input devices. Unlike Xvfb, this server accepts a framebuffer larger than its start size (`xrandr --fb`), lists RandR monitors (`xrandr --setmonitor`) and has 16 outputs, `DUMMY0` active and `DUMMY1` to `DUMMY15` disconnected, any of which becomes a monitor when it is given a mode and a position. `tests/capture/virtual_x11.rs` covers:
+
+- the facts gathered from the server: one active output `DUMMY0` at 1280x720, RandR 1.5 or newer, a spare output;
+- the framebuffer growing to 6000x3000 and a bare monitor appearing in `xrandr --listmonitors`;
+- a custom mode on `DUMMY1` turning it into a second monitor at the requested position.
+
+Requirements: `Xorg` with the `dummy` driver (Debian and Ubuntu packages `xserver-xorg-core` and `xserver-xorg-video-dummy`) and `xrandr` (package `x11-xserver-utils`). The helper runs `/usr/lib/xorg/Xorg` directly when it exists, because the `Xorg` wrapper refuses a custom config for non-root users.
+
+- When Xorg or the dummy driver is missing, or the server cannot start rootless, the tests print a skip note and pass.
+- With `SCREENDOCK_REQUIRE_XORG` set to any value, the same condition fails the test.
 
 ## Control socket
 

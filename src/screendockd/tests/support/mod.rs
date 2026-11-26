@@ -1,6 +1,10 @@
 //! Shared Xvfb and X11 painting helpers for the integration tests.
 #![allow(dead_code)]
 
+mod xorg;
+#[allow(unused_imports)]
+pub use xorg::{require_xorg, xrandr, XorgDummy};
+
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -23,11 +27,25 @@ impl Drop for Xvfb {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        remove_display_files(&self.display);
     }
 }
 
 /// Next display number to try; shared so tests running in parallel never pick the same one.
 static NEXT_DISPLAY: AtomicU32 = AtomicU32::new(0);
+
+/// A display number in 100..500 that no other helper of this process uses. A number held by a
+/// foreign server makes that server's start fail, and the callers then try the next one.
+pub(crate) fn next_display_number() -> u32 {
+    100 + (std::process::id() + NEXT_DISPLAY.fetch_add(1, Ordering::SeqCst)) % 400
+}
+
+/// Removes the socket and lock file a killed X server leaves behind.
+pub(crate) fn remove_display_files(display: &str) {
+    let number = display.trim_start_matches(':');
+    let _ = std::fs::remove_file(format!("/tmp/.X11-unix/X{number}"));
+    let _ = std::fs::remove_file(format!("/tmp/.X{number}-lock"));
+}
 
 /// Starts Xvfb on a free display number and waits until it accepts connections. `None` means
 /// Xvfb is not installed or unusable. Display numbers are probed by hand because `-displayfd` fails on hosts
@@ -35,9 +53,8 @@ static NEXT_DISPLAY: AtomicU32 = AtomicU32::new(0);
 /// socket; a host with an unusable `/tmp/.X11-unix` has to provide a writable one (for example
 /// a user and mount namespace with a tmpfs mounted there).
 fn start_xvfb() -> Option<Xvfb> {
-    let base = 100 + std::process::id() % 400;
     for _ in 0..20 {
-        let number = base + NEXT_DISPLAY.fetch_add(1, Ordering::SeqCst);
+        let number = next_display_number();
         let display = format!(":{number}");
         let spawned = Command::new("Xvfb")
             .args([

@@ -3,7 +3,69 @@
 //!
 //! The display policy in `core::display_policy` reads these facts; adapters gather them.
 
-pub use super::types::{DisplayFacts, DisplayServer, OutputFacts, OutputId, Rect};
+pub use super::types::{
+    DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, MonitorName, MonitorSpec,
+    OutputFacts, OutputId, Rect, VdisplayError, VirtualDisplay, VirtualMonitor, X11Tier,
+};
+
+/// The name used when none is given.
+pub const DEFAULT_MONITOR_NAME: &str = "ScreenDock";
+
+impl MonitorName {
+    /// Longest name a monitor gets.
+    pub const MAX_LEN: usize = 32;
+
+    /// Keeps printable ASCII without path separators, replaces everything else with `_` and
+    /// cuts the name at [`Self::MAX_LEN`]. An empty result becomes `ScreenDock`.
+    pub fn new(raw: &str) -> Self {
+        let clean: String = raw
+            .chars()
+            .map(|c| {
+                if c.is_ascii_graphic() && c != '/' && c != '\\' || c == ' ' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(Self::MAX_LEN)
+            .collect();
+        let clean = clean.trim().to_string();
+        if clean.is_empty() {
+            Self(DEFAULT_MONITOR_NAME.into())
+        } else {
+            Self(clean)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl MonitorSpec {
+    /// A spec for `rect` with a derived physical size.
+    pub fn new(name: MonitorName, rect: Rect) -> Self {
+        Self {
+            name,
+            rect,
+            size_mm: None,
+        }
+    }
+
+    /// Sets the physical size in millimetres.
+    pub fn with_size_mm(mut self, width: u32, height: u32) -> Self {
+        self.size_mm = Some((width, height));
+        self
+    }
+
+    /// The physical size: the given one, else derived from 96 dots per inch.
+    pub fn physical_mm(&self) -> (u32, u32) {
+        self.size_mm.unwrap_or_else(|| {
+            let mm = |px: u32| (u64::from(px) * 254 / 960) as u32;
+            (mm(self.rect.width), mm(self.rect.height))
+        })
+    }
+}
 
 impl Rect {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
@@ -46,6 +108,21 @@ impl DisplayFacts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monitor_names_are_sanitized_and_never_empty() {
+        assert_eq!(MonitorName::new("HDMI Extender").as_str(), "HDMI Extender");
+        assert_eq!(MonitorName::new("a/b\\c\n").as_str(), "a_b_c_");
+        assert_eq!(MonitorName::new("   ").as_str(), "ScreenDock");
+        assert_eq!(MonitorName::new(&"x".repeat(500)).as_str().len(), 32);
+    }
+
+    #[test]
+    fn physical_size_defaults_to_96_dpi() {
+        let spec = MonitorSpec::new(MonitorName::new(""), Rect::new(0, 0, 960, 480));
+        assert_eq!(spec.physical_mm(), (254, 127));
+        assert_eq!(spec.with_size_mm(170, 95).physical_mm(), (170, 95));
+    }
 
     fn output(id: u32, name: &str, primary: bool) -> OutputFacts {
         OutputFacts {

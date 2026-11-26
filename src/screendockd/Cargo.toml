@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "1.1.5"
+version = "1.2.0"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -42,8 +42,9 @@ serde_json = "1"
 anyhow = "1"
 # main.rs: CLI argument parsing (daemon and hardware validation subcommands).
 clap = { version = "4", features = ["derive"] }
-# adapters/capture/x11_shm.rs: pure-Rust X11 client with the MIT-SHM extension; needs no system libs.
-x11rb = { version = "0.14", features = ["shm"] }
+# adapters/capture/x11_shm.rs and adapters/display: pure-Rust X11 client with the MIT-SHM and
+# RandR extensions; needs no system libs.
+x11rb = { version = "0.14", features = ["shm", "randr"] }
 # Anonymous shared-memory segment (memfd) handed to the X server for XShm captures, and the
 # mapping used to read it.
 rustix = { version = "1", features = ["fs"] }

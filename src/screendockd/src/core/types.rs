@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::ports::display::OutputId;
+pub use crate::ports::display::{ExtendBackend, X11Tier, DEFAULT_MONITOR_NAME};
 use crate::protocol::edid::EdidMode;
 
 /// How long to wait for the dock's ready announcement before deciding whether it already
@@ -40,27 +40,6 @@ pub struct KeyframeClock {
     pub(super) until_key: u32,
 }
 
-/// How the monitor is provided on X11.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum X11Tier {
-    /// A real output that takes a custom mode.
-    RealOutput(OutputId),
-    /// A bare RandR monitor object over an enlarged screen.
-    BareMonitor,
-}
-
-/// A mechanism that can provide a virtual monitor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExtendBackend {
-    X11Randr(X11Tier),
-    /// `org.gnome.Mutter.ScreenCast` `RecordVirtual`.
-    Mutter,
-    /// The desktop portal's virtual source type.
-    Portal,
-    /// A headless output on a wlroots compositor (sway).
-    Wlroots,
-}
-
 /// What the dock shows: a copy of a screen, or a virtual monitor of its own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayDecision {
@@ -90,9 +69,6 @@ pub enum DisplayPolicyError {
     #[error("anchor output {0:?} was not found")]
     UnknownAnchor(String),
 }
-
-/// The monitor name used when the dock supplies none.
-pub const DEFAULT_MONITOR_NAME: &str = "ScreenDock";
 
 /// Where the dock's identity data in a [`DisplayInfo`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

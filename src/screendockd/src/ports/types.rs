@@ -383,3 +383,91 @@ pub trait EdidStore: Send + Sync + std::fmt::Debug {
     /// Replaces the stored bytes.
     fn save(&self, bytes: &[u8]) -> io::Result<()>;
 }
+
+/// How the monitor is provided on X11.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum X11Tier {
+    /// A real output that takes a custom mode.
+    RealOutput(OutputId),
+    /// A bare RandR monitor object over an enlarged screen.
+    BareMonitor,
+}
+
+/// A mechanism that can provide a virtual monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtendBackend {
+    X11Randr(X11Tier),
+    /// `org.gnome.Mutter.ScreenCast` `RecordVirtual`.
+    Mutter,
+    /// The desktop portal's virtual source type.
+    Portal,
+    /// A headless output on a wlroots compositor (sway).
+    Wlroots,
+}
+
+/// A monitor name that is safe to hand to a display server: printable ASCII, at most
+/// [`MonitorName::MAX_LEN`] characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonitorName(pub(super) String);
+
+/// What a virtual monitor should look like.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonitorSpec {
+    pub name: MonitorName,
+    /// Position and size in desktop coordinates.
+    pub rect: Rect,
+    /// Physical size in millimetres; `None` derives it from 96 dots per inch.
+    pub size_mm: Option<(u32, u32)>,
+}
+
+/// Errors from virtual displays and the display provider.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum VdisplayError {
+    /// The environment cannot provide this kind of monitor.
+    #[error("virtual display unsupported: {0}")]
+    Unsupported(String),
+    /// Connecting to the display server failed.
+    #[error("display connection failed: {0}")]
+    Connection(String),
+    /// The display server refused a request.
+    #[error("display request failed: {0}")]
+    Request(String),
+    /// The recovery state could not be written, read or applied.
+    #[error("recovery state failed: {0}")]
+    Recovery(String),
+}
+
+/// A virtual monitor that exists while the handle does. Dropping the handle removes it and
+/// restores what creating it changed.
+pub trait VirtualMonitor: Send {
+    /// Where the monitor is on the desktop now.
+    fn rect(&self) -> Rect;
+
+    /// Changes the monitor to `spec`.
+    fn resize(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError>;
+}
+
+/// One way of making virtual monitors.
+pub trait VirtualDisplay: Send {
+    /// A short name for logs and status.
+    fn name(&self) -> &'static str;
+
+    /// Creates the monitor `spec` describes.
+    fn create(&self, spec: &MonitorSpec) -> Result<Box<dyn VirtualMonitor>, VdisplayError>;
+}
+
+/// Gathers facts about the desktop and builds the display for a policy decision, so the
+/// daemon can switch between mirror and extend while it runs.
+pub trait DisplayProvider: Send {
+    /// What the environment offers right now.
+    fn facts(&self) -> Result<DisplayFacts, VdisplayError>;
+
+    /// The display for an extend decision.
+    fn virtual_display(
+        &self,
+        backend: ExtendBackend,
+    ) -> Result<Box<dyn VirtualDisplay>, VdisplayError>;
+
+    /// A display that shows an existing output instead of a new monitor.
+    fn mirror(&self, anchor: &str) -> Result<Box<dyn VirtualDisplay>, VdisplayError>;
+}

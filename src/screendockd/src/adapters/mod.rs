@@ -2,6 +2,7 @@
 
 pub mod capture;
 pub mod control;
+pub mod display;
 pub mod encode;
 pub mod transport;
 pub mod types;

@@ -33,9 +33,13 @@ jobs:
         with:
           workspaces: src/screendockd
 
-      # Xvfb backs the X11 capture integration tests (tests/capture/).
+      # Xvfb backs the X11 capture integration tests (tests/capture/). Xorg with the dummy driver
+      # and xrandr back the virtual monitor tests, which skip when the runner cannot start a
+      # rootless Xorg.
       - name: Install system packages
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          xvfb xorg xserver-xorg-video-dummy x11-xserver-utils
 
       - name: Check formatting (cargo fmt)
         run: cargo fmt --check
@@ -103,7 +107,7 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
-          libx264-dev clang pkg-config ffmpeg xvfb
+          libx264-dev clang pkg-config ffmpeg xvfb xorg xserver-xorg-video-dummy x11-xserver-utils
 
       - name: Lint with encode-ffmpeg feature
         run: cargo clippy --all-targets --features encode-ffmpeg -- -D warnings

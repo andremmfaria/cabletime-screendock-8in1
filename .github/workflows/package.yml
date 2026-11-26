@@ -33,6 +33,7 @@ jobs:
       - name: Install system packages
         run: >
           sudo apt-get update && sudo apt-get install -y xvfb
+          xorg xserver-xorg-video-dummy x11-xserver-utils
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
           libx264-dev clang pkg-config
 
