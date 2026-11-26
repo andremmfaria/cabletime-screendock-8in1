@@ -201,7 +201,11 @@ pub enum DockMessage {
     /// The dock's heartbeat.
     Heartbeat,
     /// `common.data_passthrough` with the given params id.
-    Passthrough { id: Option<u64> },
+    Passthrough {
+        id: Option<u64>,
+        /// The decoded `data` payload, when present, valid base64 and within [`MAX_PASSTHROUGH_DATA`].
+        data: Option<Vec<u8>>,
+    },
     /// A result or error for one of our requests.
     Reply {
         id: u64,
@@ -297,4 +301,88 @@ pub enum ControlWireError {
     /// The line is not a valid message.
     #[error("invalid control message: {0}")]
     Json(String),
+}
+
+/// Size of one EDID block in bytes.
+pub const EDID_BLOCK_LEN: usize = 128;
+
+/// The fixed eight byte header every EDID base block starts with.
+pub const EDID_HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
+
+/// Largest passthrough `data` text (base64 characters) that is decoded.
+pub const MAX_PASSTHROUGH_DATA: usize = 24 * 1024;
+
+/// A length in millimetres.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Millimetres(pub u16);
+
+/// A refresh rate in thousandths of a hertz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RefreshMilliHz(pub u32);
+
+/// A display name taken from device data: printable ASCII only, path separators replaced,
+/// never empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayName(pub(super) String);
+
+impl DisplayName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DisplayName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// One video mode advertised in an EDID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EdidMode {
+    pub width: u16,
+    pub height: u16,
+    pub refresh: RefreshMilliHz,
+}
+
+/// The fields this driver reads from a dock EDID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edid {
+    /// The three letter manufacturer id; unknown letters are `?`.
+    pub manufacturer: String,
+    pub product_code: u16,
+    pub serial: u32,
+    /// Year of manufacture or model year.
+    pub year: u16,
+    /// EDID structure version and revision.
+    pub version: (u8, u8),
+    /// Physical picture size, when the base block states one.
+    pub physical_size: Option<(Millimetres, Millimetres)>,
+    /// The monitor name descriptor, sanitized.
+    pub name: Option<DisplayName>,
+    /// The first detailed timing, which is the preferred and native mode.
+    pub preferred: Option<EdidMode>,
+    /// Detailed timings, then standard timings, without duplicates.
+    pub modes: Vec<EdidMode>,
+    /// Extension blocks the base block declares.
+    pub extension_blocks: u8,
+    /// Bytes after the declared blocks, ignored.
+    pub trailing_bytes: usize,
+}
+
+/// Errors from parsing an EDID.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum EdidError {
+    /// Fewer bytes than one base block.
+    #[error("EDID has {len} bytes, a base block needs {EDID_BLOCK_LEN}")]
+    TooShort { len: usize },
+    /// The first eight bytes are not the EDID header.
+    #[error("EDID header is wrong")]
+    BadHeader,
+    /// A block does not sum to zero modulo 256.
+    #[error("EDID block {block} fails its checksum")]
+    BadChecksum { block: usize },
+    /// The base block declares more blocks than the input holds.
+    #[error("EDID declares {declared_blocks} blocks but holds only {len} bytes")]
+    Truncated { declared_blocks: usize, len: usize },
 }

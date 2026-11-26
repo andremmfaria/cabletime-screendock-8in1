@@ -5,8 +5,8 @@
 use serde_json::Value;
 
 use super::framing::{FIRST_CHUNK_PAYLOAD_MAX, HEADER_SIZE};
-use super::types::MAX_INBOUND_LEN;
 pub use super::types::{DockMessage, InboundAssembler, LOG_TEXT_MAX};
+use super::types::{MAX_INBOUND_LEN, MAX_PASSTHROUGH_DATA};
 
 /// Parses the JSON text of one dock message.
 pub fn parse_dock_message(text: &[u8]) -> DockMessage {
@@ -20,12 +20,17 @@ pub fn parse_dock_message(text: &[u8]) -> DockMessage {
         return match method {
             "notify-app-accessories-are-ready" => DockMessage::Ready,
             "heartbeat" => DockMessage::Heartbeat,
-            "common.data_passthrough" => DockMessage::Passthrough {
-                id: object
-                    .get("params")
-                    .and_then(|p| p.get("id"))
-                    .and_then(Value::as_u64),
-            },
+            "common.data_passthrough" => {
+                let params = object.get("params");
+                DockMessage::Passthrough {
+                    id: params.and_then(|p| p.get("id")).and_then(Value::as_u64),
+                    data: params
+                        .and_then(|p| p.get("data"))
+                        .and_then(Value::as_str)
+                        .filter(|text| text.len() <= MAX_PASSTHROUGH_DATA)
+                        .and_then(decode_base64),
+                }
+            }
             other => DockMessage::Other {
                 method: other.chars().take(LOG_TEXT_MAX).collect(),
             },
@@ -39,6 +44,31 @@ pub fn parse_dock_message(text: &[u8]) -> DockMessage {
         }
     }
     DockMessage::Unrecognized
+}
+
+/// Decodes standard base64 with optional padding. Any other character fails the whole text.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let text = text.trim_end_matches('=');
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in text.bytes() {
+        let value = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 impl InboundAssembler {
@@ -118,7 +148,35 @@ mod tests {
         );
         assert_eq!(
             parse_dock_message(br#"{"method":"common.data_passthrough","params":{"id":101,"size":258,"data":"AA=="}}"#),
-            DockMessage::Passthrough { id: Some(101) }
+            DockMessage::Passthrough {
+                id: Some(101),
+                data: Some(vec![0])
+            }
+        );
+        assert_eq!(
+            parse_dock_message(
+                br#"{"method":"common.data_passthrough","params":{"id":103,"data":"AQ=="}}"#
+            ),
+            DockMessage::Passthrough {
+                id: Some(103),
+                data: Some(vec![1])
+            }
+        );
+        assert_eq!(
+            parse_dock_message(
+                br#"{"method":"common.data_passthrough","params":{"id":101,"data":"not base64!"}}"#
+            ),
+            DockMessage::Passthrough {
+                id: Some(101),
+                data: None
+            }
+        );
+        assert_eq!(
+            parse_dock_message(br#"{"method":"common.data_passthrough"}"#),
+            DockMessage::Passthrough {
+                id: None,
+                data: None
+            }
         );
         assert_eq!(
             parse_dock_message(br#"{"id":4,"result":"isAllowed","jrpcSeq":7743}"#),

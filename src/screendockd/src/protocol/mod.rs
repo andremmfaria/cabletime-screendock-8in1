@@ -4,6 +4,7 @@
 pub mod annexb;
 pub mod control;
 pub mod display;
+pub mod edid;
 pub mod framing;
 pub mod heartbeat;
 pub mod inbound;

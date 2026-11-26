@@ -45,7 +45,7 @@ pub(super) fn reader_thread(
             DockMessage::Ready => {
                 let _ = events.send(DockEvent::Ready);
             }
-            DockMessage::Passthrough { id } => {
+            DockMessage::Passthrough { id, .. } => {
                 if id == Some(messages::EDID_PASSTHROUGH_ID) {
                     if let Err(e) = send_control(writer, messages::EDID_ACK) {
                         warn!(error = %e, "couldn't answer the dock's EDID passthrough");

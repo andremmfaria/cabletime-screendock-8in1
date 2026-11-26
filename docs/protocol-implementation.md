@@ -100,6 +100,16 @@ Loss detection: while armed (`Active` or `AssumedActive`), the controller watche
 
 Video gating: the daemon's video loop captures and writes nothing while the state is not armed, and re-checks the state before every message. The validation tools do the same: `isolate` with an MI_00 handle (`heartbeat` and `both` modes) starts a session and `both` starts video only once it is armed; `replay` opens MI_00, starts a session and waits up to 30 s for it to arm. `--no-handshake` keeps only the heartbeat thread and arms immediately, for regular files standing in for the nodes.
 
+## Dock EDID
+
+The passthrough message with id 101 carries the dock's EDID as base64 in `params.data`, with a declared `size` of 258. `parse_dock_message` decodes the payload into `DockMessage::Passthrough { id, data }`; text that is longer than 24 KiB or is not valid base64 yields no data.
+
+`protocol::edid::Edid::parse(&[u8])` reads the base block: the manufacturer letters, product code, serial, year, structure version, the physical size in millimetres (from the centimetre bytes, absent when either is zero), the monitor name descriptor, and the four descriptor slots. A progressive detailed timing becomes a mode with its refresh rate in thousandths of a hertz, computed from the pixel clock and the totals; the first slot, when it holds a timing, is the preferred mode. Standard timings follow the detailed ones, and duplicates are dropped. Unused standard timing slots, descriptors with a zero clock or zero active size, and interlaced timings produce no mode. The extension count at byte 126 gives the number of declared blocks; every declared block must sum to zero modulo 256, and a block that does not is reported by index. Input shorter than one block, with a wrong header, or shorter than the declared blocks is an error. Bytes after the declared blocks are ignored and counted in `trailing_bytes`. Extension blocks are counted and checksummed but not interpreted.
+
+The monitor name is reduced to printable ASCII: it stops at a line feed, drops control and non-ASCII bytes, replaces `/` and `\` with `_`, and is `None` when nothing remains.
+
+Layout of the dock's own message: 258 bytes, which are the base block, one CTA extension block (tag 2, revision 3) and two trailing zero bytes. The base block declares one extension, so the parser takes 256 bytes and reports 2 trailing bytes; the two bytes are zero in the captured message and carry no information the driver uses. The dock states the name `HDMI Extender`, a 62 by 34 cm picture, a preferred timing of 1920x1080 at 60 Hz and the modes 1920x1080, 1280x720, 1280x960, 1280x800, 1280x1024 and 1600x900, all at 60 Hz.
+
 ## Annex-B splitting
 
 `protocol::annexb::messages_from_annexb` turns an Annex-B byte stream into dock messages: SPS, PPS and SEI NAL units accumulate and are bundled with the IDR slice that follows into one message; a non-IDR slice is its own message; access unit delimiters and other NAL types are dropped. Start codes are kept on every NAL. This is used by the validation tools to replay a real stream.
