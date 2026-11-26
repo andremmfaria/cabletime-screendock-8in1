@@ -12,6 +12,7 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [capture.md](capture.md) | Capture layer: frame types, backend selection, X11 XShm and Wayland portal backends, the `capture` command |
 | [encoding.md](encoding.md) | Encoder trait, libx264 and prerecorded encoders, message policy, the `bench` CPU measurement |
 | [control.md](control.md) | The control socket of a running daemon: wire format, `ctl` commands, exit codes and the setting names |
+| [virtual-display.md](virtual-display.md) | The virtual monitor: display port, X11 tiers, placement and crash recovery |
 | [daemon.md](daemon.md) | The `run` daemon: startup, loops, error policy, shutdown, resolution picker, device section |
 | [testing.md](testing.md) | Test layers, how to run them, and what each one covers |
 | [install.md](install.md) | Installing from packages or source, permissions, the systemd user unit, running and troubleshooting |

@@ -50,7 +50,13 @@ The PNG files show the empty Xvfb root window; paint something first (for exampl
 
 - the facts gathered from the server: one active output `DUMMY0` at 1280x720, RandR 1.5 or newer, a spare output;
 - the framebuffer growing to 6000x3000 and a bare monitor appearing in `xrandr --listmonitors`;
-- a custom mode on `DUMMY1` turning it into a second monitor at the requested position.
+- a custom mode on `DUMMY1` turning it into a second monitor at the requested position;
+- a bare monitor and a real output monitor: listed by `xrandr --listmonitors`, captured with exactly the monitor pixels (painted corners checked), removed on drop with the screen size and the recovery file restored;
+- an output the server refuses falling back to a bare monitor;
+- resizing in both tiers;
+- recovery of a monitor that was leaked as a killed daemon would leave it.
+
+The unit tests of `adapters::display::x11_randr` run the same tier logic against a recording double: the exact request order, screen growth, undo on drop, undo after a refused step, negative positions and leaked monitors. The recovery file tests cover the round trip, file modes, corrupt and oversized files and a state owned by a running process.
 
 Requirements: `Xorg` with the `dummy` driver (Debian and Ubuntu packages `xserver-xorg-core` and `xserver-xorg-video-dummy`) and `xrandr` (package `x11-xserver-utils`). The helper runs `/usr/lib/xorg/Xorg` directly when it exists, because the `Xorg` wrapper refuses a custom config for non-root users.
 

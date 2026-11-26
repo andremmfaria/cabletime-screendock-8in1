@@ -218,6 +218,17 @@ The config has one `Device` with `Driver "dummy"` and `VideoRam 256000`, one `Mo
 | Turning `DUMMY1` off, `--delmode`, `--rmmode` | the monitor disappears and the layout returns to one monitor |
 | Two `Device` sections in one layout | two separate X screens, each with its own `DUMMY0`; not a second output on one screen |
 
+Monitors made by `X11RandrDisplay` on this server, each captured with exact pixels over a painted rectangle:
+
+| Tier | Result |
+|---|---|
+| 1, real output (`DUMMY1`, custom mode) | listed by `xrandr --listmonitors`, second output in the facts, capture exact, drop restores one monitor and the 1280x720 screen |
+| 2, bare monitor over an enlarged screen | listed, capture exact (the pixels exist because the screen covers the rectangle), drop restores |
+| Resize in both tiers | the listed geometry changes and the screen grows |
+| Leaked monitor, then recovery | removed, screen size restored, state file deleted |
+
+Whether a desktop environment's display settings list a bare tier 2 monitor, and whether a compositor paints it, requires validation on a real session.
+
 The `modesetting` driver on the i915 GPU cannot start without root here: Xorg reports `Cannot open /dev/tty0 (Permission denied)`, and `/dev/dri/card0` is `root:video` with mode 0660. Status: requires validation on a machine with a logged in X11 session and a real GPU driver.
 
 ## Dry runs without a dock
