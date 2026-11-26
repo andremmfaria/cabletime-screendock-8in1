@@ -45,6 +45,19 @@ The daemon's capture backend on Wayland opens its own portal session for the who
 
 Status: the portal display is tested against a mocked portal (token handling, timeout, session close, resize). A live portal virtual source requires validation: headless GNOME does not offer one.
 
+## Sway headless output
+
+`WlrootsHeadlessDisplay` makes the monitor as a headless output of sway, through the sway IPC socket (`$SWAYSOCK`). It is chosen by `auto` when `$XDG_CURRENT_DESKTOP` names sway and a socket exists, or by `wayland_backend = "wlroots"`.
+
+- `create` runs `create_output`, finds the one new output, then sets `mode <W>x<H>` and `pos <X> <Y>` from the placed rectangle and waits up to 3 seconds until `GET_OUTPUTS` reports exactly that rectangle. Any failure unplugs the new output again.
+- Placement applies as on X11: the default is right of the primary output, which is the first active output sway lists.
+- sway names the output (`HEADLESS-<n>`), so the monitor name does not apply. The name is checked against `[A-Za-z0-9_.-]` before it goes into a command.
+- `resize` sets mode and position again. Dropping the monitor runs `output <name> unplug`.
+- A headless output belongs to the compositor, not to the IPC connection. A daemon that is killed with SIGKILL leaves its output in place until it is unplugged (`swaymsg output HEADLESS-<n> unplug`) or sway exits; the next start creates another one.
+- The IPC client reads replies of at most 1 MiB, checks the magic and message type, and parses JSON into typed fields.
+
+Capturing the output's frames through `xdg-desktop-portal-wlr` without a prompt (the portal's `chooser_type=none` with an `output_name`) has not been tried. Status: requires validation. The daemon's Wayland capture backend does not follow a monitor rectangle yet, so extend mode on sway creates the output and then mirrors under the `mirror` fallback; a runtime switch to extend is rejected with the capture backend's reason.
+
 ## Placement
 
 The monitor sits next to the anchor output as `placement` says: `right-of` (the default), `left-of`, `above`, `below`, or at fixed coordinates with `at`. The anchor is an output name or `primary`. The size is `[display] width` by `height`. Capture reads exactly the monitor rectangle through XShm; see [capture.md](capture.md).

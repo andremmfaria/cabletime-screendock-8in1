@@ -1,7 +1,10 @@
 //! Shared Xvfb and X11 painting helpers for the integration tests.
 #![allow(dead_code)]
 
+mod sway;
 mod xorg;
+#[allow(unused_imports)]
+pub use sway::{require_sway, SwayHeadless};
 #[allow(unused_imports)]
 pub use xorg::{require_xorg, xrandr, XorgDummy};
 

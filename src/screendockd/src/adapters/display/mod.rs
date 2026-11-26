@@ -8,13 +8,16 @@ mod mirror;
 mod portal;
 mod randr;
 mod recovery;
+pub mod sway_ipc;
 pub mod types;
+mod wlroots;
 mod x11_randr;
 
 pub use self::facts::{session_facts, x11_facts};
 pub use self::mirror::{MirrorDisplay, MirrorMonitor};
 pub use self::portal::probe_source_types;
 pub use self::recovery::recover;
+pub use self::sway_ipc::sway_output_facts;
 #[cfg(feature = "capture-wayland")]
 pub use self::types::AshpdPortalSource;
 pub use self::types::{
@@ -25,6 +28,7 @@ pub use self::types::{
     RandrBackend, RecoveryOutcome, RecoveryState, RecoveryStore, ScreenSize, SystemDisplayProvider,
     X11MonitorGuard, X11RandrDisplay, XRandr,
 };
+pub use self::types::{SwayIpc, SwayOutput, WlrootsHeadlessDisplay, WlrootsMonitor};
 use crate::ports::display::{
     DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, VdisplayError, VirtualDisplay,
 };
@@ -43,6 +47,16 @@ impl SystemDisplayProvider {
         Self {
             x11_display: Some(display.into()),
             recovery: None,
+            sway_socket: None,
+        }
+    }
+
+    /// A provider for the sway whose IPC socket is at `socket`, whatever the environment
+    /// says.
+    pub fn for_sway(socket: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            sway_socket: Some(socket.into()),
+            ..Self::default()
         }
     }
 
@@ -62,12 +76,28 @@ impl SystemDisplayProvider {
 
 impl DisplayProvider for SystemDisplayProvider {
     fn facts(&self) -> Result<DisplayFacts, VdisplayError> {
+        if let Some(socket) = &self.sway_socket {
+            return Ok(DisplayFacts {
+                server: DisplayServer::Wayland,
+                // The socket belongs to sway, whatever the environment says.
+                desktop: "sway".into(),
+                outputs: sway_output_facts(socket)?,
+                sway_socket: true,
+                ..DisplayFacts::default()
+            });
+        }
         match &self.x11_display {
             Some(display) => x11_facts(Some(display)),
             None => {
                 let mut facts = session_facts(|name| std::env::var(name).ok())?;
                 if facts.server == DisplayServer::Wayland {
                     facts.portal_source_types = probe_source_types(PORTAL_PROBE_TIMEOUT);
+                    if let Some(socket) = std::env::var_os("SWAYSOCK").filter(|v| !v.is_empty()) {
+                        match sway_output_facts(std::path::Path::new(&socket)) {
+                            Ok(outputs) => facts.outputs = outputs,
+                            Err(e) => tracing::warn!(error = %e, "could not list the sway outputs"),
+                        }
+                    }
                 }
                 Ok(facts)
             }
@@ -91,6 +121,10 @@ impl DisplayProvider for SystemDisplayProvider {
                     store,
                 )))
             }
+            ExtendBackend::Wlroots => Ok(Box::new(match &self.sway_socket {
+                Some(socket) => WlrootsHeadlessDisplay::new(socket),
+                None => WlrootsHeadlessDisplay::from_env()?,
+            })),
             #[cfg(feature = "capture-wayland")]
             ExtendBackend::Portal => Ok(Box::new(PortalVirtualDisplay::new(std::sync::Arc::new(
                 AshpdPortalSource,

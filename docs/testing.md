@@ -122,6 +122,12 @@ Status: requires validation.
 
 The portal virtual display is unit tested against a mocked portal source: restore token reuse and replacement, the start timeout, closing a late stream, closing the session on drop and the resize rules. These tests run in every build.
 
+## Capture: headless sway
+
+The sway tests (`tests/capture/virtual_sway.rs`, helper `tests/support/sway.rs`) start sway with `WLR_BACKENDS=headless`, `WLR_LIBINPUT_NO_DEVICES=1` and `WLR_RENDERER=pixman` on a private runtime directory under `/tmp`, and stop it when the test ends. They cover output creation at the placed rectangle, resizing, several monitors, pixels read back with `grim`, display facts and policy choice, and switching the display mode through the monitor manager. The IPC client has unit tests against a fake socket.
+
+The tests skip with a message when sway cannot start; `SCREENDOCK_REQUIRE_SWAY=1` turns that into a failure. The pixel test also needs `grim`. CI installs sway and grim and does not set the variable, so a runner that cannot run sway headless skips these tests.
+
 ## Capture, Stage 2: real desktop
 
 Run on a machine with an interactive session. Status: requires validation.

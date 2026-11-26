@@ -233,6 +233,26 @@ Whether a desktop environment's display settings list a bare tier 2 monitor, and
 
 The `modesetting` driver on the i915 GPU cannot start without root here: Xorg reports `Cannot open /dev/tty0 (Permission denied)`, and `/dev/dri/card0` is `root:video` with mode 0660. Status: requires validation on a machine with a logged in X11 session and a real GPU driver.
 
+## Headless sway
+
+Validated on the development host (Ubuntu 26.04, sway 1.11, `grim`) with sway started as the ordinary user on a private runtime directory:
+
+```text
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c /dev/null
+```
+
+| Check | Result |
+|---|---|
+| Start | one output `HEADLESS-1` at 1280x720; the IPC and Wayland sockets appear in the runtime directory |
+| `create_output` | a new `HEADLESS-<n>` output |
+| `output <name> mode WxH pos X Y` | any size is accepted at run time; `GET_OUTPUTS` reports the rectangle, with an empty mode list |
+| `output <name> unplug` | the output disappears |
+| `grim -o <name> -` after `output <name> bg #1060d0 solid_color` | a PNG of the output size (1280x720, then 900x720 after a resize) whose pixels equal the colour |
+
+`WlrootsHeadlessDisplay` on this server: the output is created at the placed rectangle (right of `HEADLESS-1` by default), resized and moved, several monitors coexist, and dropping the monitor or the monitor manager unplugs the output. Switching the display mode through the monitor manager creates and removes the output.
+
+Not verified: a prompt free `xdg-desktop-portal-wlr` screencast of a headless output, frames read from the output by the daemon, and sway on real hardware. Status: requires validation.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:

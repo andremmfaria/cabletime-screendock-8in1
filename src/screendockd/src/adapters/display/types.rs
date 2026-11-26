@@ -26,6 +26,8 @@ pub struct SystemDisplayProvider {
     pub(super) x11_display: Option<String>,
     /// Where the recovery file goes; `None` uses `$XDG_RUNTIME_DIR`.
     pub(super) recovery: Option<RecoveryStore>,
+    /// The sway IPC socket to use; `None` uses `$SWAYSOCK`.
+    pub(super) sway_socket: Option<PathBuf>,
 }
 
 /// Size of the X screen (the framebuffer) in pixels and millimetres.
@@ -205,3 +207,45 @@ pub(super) const TOKEN_FILE: &str = "portal-restore-token";
 #[cfg(feature = "capture-wayland")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AshpdPortalSource;
+
+/// A connection to the sway IPC socket (the i3 IPC framing).
+#[derive(Debug)]
+pub struct SwayIpc {
+    pub(super) stream: std::os::unix::net::UnixStream,
+}
+
+/// One output as `GET_OUTPUTS` reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwayOutput {
+    pub name: String,
+    pub rect: Rect,
+    pub active: bool,
+}
+
+/// Makes virtual monitors as headless outputs of a wlroots compositor (sway), through its IPC
+/// socket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WlrootsHeadlessDisplay {
+    pub(super) socket: PathBuf,
+}
+
+/// A headless output. Dropping it unplugs the output.
+#[derive(Debug)]
+pub struct WlrootsMonitor {
+    pub(super) socket: PathBuf,
+    pub(super) ipc: SwayIpc,
+    pub(super) name: String,
+    pub(super) rect: Rect,
+}
+
+/// Magic bytes that start every IPC message.
+pub(super) const IPC_MAGIC: &[u8; 6] = b"i3-ipc";
+/// Message types of the IPC requests the adapter sends.
+pub(super) const IPC_RUN_COMMAND: u32 = 0;
+pub(super) const IPC_GET_OUTPUTS: u32 = 3;
+/// Largest reply payload read.
+pub(super) const IPC_MAX_PAYLOAD: usize = 1 << 20;
+/// How long an IPC read or write may block.
+pub(super) const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long a changed output gets to show the new geometry.
+pub(super) const OUTPUT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);

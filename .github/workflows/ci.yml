@@ -35,11 +35,12 @@ jobs:
 
       # Xvfb backs the X11 capture integration tests (tests/capture/). Xorg with the dummy driver
       # and xrandr back the virtual monitor tests, which skip when the runner cannot start a
-      # rootless Xorg.
+      # rootless Xorg. sway and grim back the headless sway tests, which skip when the runner
+      # cannot start sway without a GPU.
       - name: Install system packages
         run: >
           sudo apt-get update && sudo apt-get install -y
-          xvfb xorg xserver-xorg-video-dummy x11-xserver-utils
+          xvfb xorg xserver-xorg-video-dummy x11-xserver-utils sway grim
 
       - name: Check formatting (cargo fmt)
         run: cargo fmt --check
