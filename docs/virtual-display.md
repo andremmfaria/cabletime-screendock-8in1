@@ -10,7 +10,7 @@ The dock can show a monitor of its own instead of a copy of an existing screen. 
 |---|---|
 | `DisplayFacts` | What the environment offers: display server, desktop, outputs with rectangles, RandR version, a free output |
 | `VirtualDisplay` | One way of making monitors: `create(&MonitorSpec)` returns a `VirtualMonitor` |
-| `VirtualMonitor` | A handle with `rect()` and `resize(&MonitorSpec)`. Dropping it removes the monitor and restores what creating it changed |
+| `VirtualMonitor` | A handle with `rect()`, `resize(&MonitorSpec)` and `pipewire_node()` for stream backed monitors. Dropping it removes the monitor and restores what creating it changed |
 | `DisplayProvider` | Gathers the facts and builds the display for a policy decision (`virtual_display`) or a mirror of an output (`mirror`) |
 | `MonitorSpec` | A `MonitorName`, a `Rect` and an optional physical size in millimetres. Without a size, 96 dots per inch is assumed |
 
@@ -29,6 +29,21 @@ The dock can show a monitor of its own instead of a copy of an existing screen. 
 The policy picks tier 1 when the facts report a free output and tier 2 otherwise. When the server refuses tier 1, the daemon logs the reason and makes a tier 2 monitor. A tier 1 monitor carries the name of its output (`DUMMY1` on the dummy driver); a tier 2 monitor carries the monitor name. Tier 1 needs an output that can take a mode, which real drivers usually do not offer for unplugged connectors; the dummy driver offers fifteen.
 
 Creating a monitor first grows the X screen so it holds the monitor rectangle, then defines the monitor. A position with a negative coordinate cannot be placed on an X screen and is refused. Resizing a tier 2 monitor replaces its definition; resizing a tier 1 monitor creates the new mode, moves the output to it and removes the old mode. The screen grows when the new rectangle needs it.
+
+## Portal display
+
+`PortalVirtualDisplay` asks the desktop portal for a screen stream of the virtual source type. It is used when `wayland_backend` is `portal`, or by `auto` where the portal's `AvailableSourceTypes` includes the virtual bit (value 4). The portal chooses the monitor's position and size, so `placement` and `anchor` do not apply; the monitor's rectangle is the requested position with the size the portal reports for the stream, falling back to the requested size.
+
+- The start runs on a worker thread and is given 15 seconds. A start that does not answer in time is reported as `unsupported`, and the `fallback` setting then decides between mirroring with the reason and ending startup. A stream that arrives after the timeout is closed.
+- The restore token the portal returns is kept in `$XDG_STATE_HOME/screendockd/portal-restore-token` (mode 0600, written atomically) and presented at the next start, so a portal that supports it can skip its prompt. A token file that holds anything but a printable token of at most 256 characters is ignored.
+- `VirtualMonitor::pipewire_node` returns the PipeWire node of the stream. Dropping the monitor closes the portal session.
+- A portal monitor cannot change its size: `resize` accepts a move and refuses another size, so the monitor manager recreates the monitor instead.
+- The provider reads the portal's source types once per facts query, within 3 seconds, and treats a missing portal as unknown.
+- The portal display needs the `capture-wayland` feature. Without it a request for the portal backend is refused with the reason.
+
+The daemon's capture backend on Wayland opens its own portal session for the whole desktop and cannot follow a monitor rectangle. When it refuses to retarget and the `fallback` setting is `mirror`, the daemon logs the reason, removes the monitor and mirrors; with `fail` it ends.
+
+Status: the portal display is tested against a mocked portal (token handling, timeout, session close, resize). A live portal virtual source requires validation: headless GNOME does not offer one.
 
 ## Placement
 

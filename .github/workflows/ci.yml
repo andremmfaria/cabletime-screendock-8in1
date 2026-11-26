@@ -107,10 +107,14 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
-          libx264-dev clang pkg-config ffmpeg xvfb xorg xserver-xorg-video-dummy x11-xserver-utils
+          libx264-dev libpipewire-0.3-dev libspa-0.2-dev clang pkg-config ffmpeg xvfb xorg
+          xserver-xorg-video-dummy x11-xserver-utils
 
       - name: Lint with encode-ffmpeg feature
         run: cargo clippy --all-targets --features encode-ffmpeg -- -D warnings
+
+      - name: Lint with encode-ffmpeg and capture-wayland features
+        run: cargo clippy --all-targets --features encode-ffmpeg,capture-wayland -- -D warnings
 
       # SCREENDOCK_REQUIRE_FFMPEG makes a missing ffmpeg binary a failure instead of a skip.
       - name: Test with encode-ffmpeg feature

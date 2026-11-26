@@ -27,15 +27,15 @@ jobs:
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # The packaged binary is built with the libx264 encoder, so the libav development files
-      # (and clang for bindgen) are needed at build time. Screen capture over X11 is pure Rust
-      # and always compiled in.
+      # The packaged binary is built with the libx264 encoder and the Wayland capture backend,
+      # so the libav and PipeWire development files (and clang for bindgen) are needed at build
+      # time. Screen capture over X11 is pure Rust and always compiled in.
       - name: Install system packages
         run: >
           sudo apt-get update && sudo apt-get install -y xvfb
           xorg xserver-xorg-video-dummy x11-xserver-utils
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
-          libx264-dev clang pkg-config
+          libx264-dev libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
 
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@v2
@@ -43,7 +43,7 @@ jobs:
           workspaces: src/screendockd
 
       - name: Build release binary
-        run: cargo build --release --verbose --features encode-ffmpeg
+        run: cargo build --release --verbose --features encode-ffmpeg,capture-wayland
 
       # cargo-deb and cargo-generate-rpm aren't part of the default toolchain; `cargo install`
       # builds them from source off crates.io using nothing but network access + GITHUB_TOKEN's

@@ -22,10 +22,11 @@ use crate::app::monitor::{MonitorManager, MonitorPipeline};
 use crate::app::pipeline::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use crate::app::supervisor::{PipelineHandle, ReloadFn, Supervisor};
 use crate::core::reconfig::LiveSettings;
-use crate::ports::capture::{CaptureArea, CaptureTarget};
+use crate::ports::capture::{CaptureArea, CaptureError, CaptureTarget};
 use crate::ports::control::Command;
 use crate::ports::encode::EncoderSettings;
 use crate::utils::config::Config;
+use crate::utils::types::FallbackPolicy;
 
 use super::support::{
     device_ids, geometry, load_config, resolve_nodes, session_settings, shutdown_flag,
@@ -52,14 +53,27 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         Box::new(SystemDisplayProvider::new()),
         config.virtual_display.clone(),
     );
-    let area = monitors.start(&live).map_err(|e| anyhow::anyhow!(e))?;
+    let mut area = monitors.start(&live).map_err(|e| anyhow::anyhow!(e))?;
     if area != CaptureArea::Whole {
-        capture
-            .retarget(CaptureTarget {
-                area,
-                fps: live.fps,
-            })
-            .context("failed to point capture at the monitor")?;
+        let target = CaptureTarget {
+            area,
+            fps: live.fps,
+        };
+        match capture.retarget(target) {
+            Ok(()) => {}
+            Err(CaptureError::Unsupported(what))
+                if config.virtual_display.fallback == FallbackPolicy::Mirror =>
+            {
+                tracing::warn!(
+                    capture = capture.name(),
+                    what,
+                    "capture cannot follow the virtual monitor; mirroring the desktop instead"
+                );
+                monitors.release();
+                area = CaptureArea::Whole;
+            }
+            Err(e) => return Err(e).context("failed to point capture at the monitor"),
+        }
     }
     let settings = EncoderSettings::from_config(config, geometry);
     let mut encoder =

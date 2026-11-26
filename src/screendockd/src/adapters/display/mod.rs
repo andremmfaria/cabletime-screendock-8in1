@@ -5,6 +5,7 @@
 
 mod facts;
 mod mirror;
+mod portal;
 mod randr;
 mod recovery;
 pub mod types;
@@ -12,14 +13,24 @@ mod x11_randr;
 
 pub use self::facts::{session_facts, x11_facts};
 pub use self::mirror::{MirrorDisplay, MirrorMonitor};
+pub use self::portal::probe_source_types;
 pub use self::recovery::recover;
+#[cfg(feature = "capture-wayland")]
+pub use self::types::AshpdPortalSource;
+pub use self::types::{
+    PortalMonitor, PortalRequest, PortalSource, PortalStream, PortalVirtualDisplay, TokenStore,
+    DEFAULT_PORTAL_TIMEOUT,
+};
 pub use self::types::{
     RandrBackend, RecoveryOutcome, RecoveryState, RecoveryStore, ScreenSize, SystemDisplayProvider,
     X11MonitorGuard, X11RandrDisplay, XRandr,
 };
 use crate::ports::display::{
-    DisplayFacts, DisplayProvider, ExtendBackend, VdisplayError, VirtualDisplay,
+    DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, VdisplayError, VirtualDisplay,
 };
+
+/// How long the provider waits for the portal to name its source types.
+const PORTAL_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl SystemDisplayProvider {
     /// A provider for the session described by the environment.
@@ -53,7 +64,13 @@ impl DisplayProvider for SystemDisplayProvider {
     fn facts(&self) -> Result<DisplayFacts, VdisplayError> {
         match &self.x11_display {
             Some(display) => x11_facts(Some(display)),
-            None => session_facts(|name| std::env::var(name).ok()),
+            None => {
+                let mut facts = session_facts(|name| std::env::var(name).ok())?;
+                if facts.server == DisplayServer::Wayland {
+                    facts.portal_source_types = probe_source_types(PORTAL_PROBE_TIMEOUT);
+                }
+                Ok(facts)
+            }
         }
     }
 
@@ -74,6 +91,10 @@ impl DisplayProvider for SystemDisplayProvider {
                     store,
                 )))
             }
+            #[cfg(feature = "capture-wayland")]
+            ExtendBackend::Portal => Ok(Box::new(PortalVirtualDisplay::new(std::sync::Arc::new(
+                AshpdPortalSource,
+            )))),
             other => Err(VdisplayError::Unsupported(format!(
                 "{other:?} is not available in this build"
             ))),

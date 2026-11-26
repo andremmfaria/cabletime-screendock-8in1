@@ -25,6 +25,11 @@ impl MonitorManager {
         }
     }
 
+    /// Removes the monitor, so the whole desktop is captured again.
+    pub fn release(&mut self) {
+        self.monitor = None;
+    }
+
     /// The area to capture now: the monitor rectangle, or the whole desktop.
     pub fn area(&self) -> CaptureArea {
         self.monitor

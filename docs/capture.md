@@ -35,7 +35,7 @@ Status: verified against Xvfb with painted content (see [testing.md](testing.md)
 
 ## Wayland backend (`adapters/capture/wayland_portal.rs`)
 
-`WaylandPortalCapture` uses the xdg-desktop-portal ScreenCast interface through `ashpd` and consumes frames with `pipewire-rs`. It is compiled only with the cargo feature `capture-wayland`, which needs the libpipewire-0.3 and libspa-0.2 development files plus clang for bindgen. Without the feature the type exists and `connect` returns `BackendUnavailable`.
+`WaylandPortalCapture` uses the xdg-desktop-portal ScreenCast interface through `ashpd` and consumes frames with `pipewire-rs`. It is compiled only with the cargo feature `capture-wayland`, which needs the libpipewire-0.3 and libspa-0.2 development files plus clang for bindgen. Without the feature the type exists and `connect` returns `BackendUnavailable`. The `.deb` and `.rpm` packages are built with the feature.
 
 With the feature enabled:
 

@@ -47,7 +47,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `protocol::control` | The control wire format: `ControlRequest` and `ControlResponse` as one JSON object per line, with a 4096 byte request cap. See [control.md](control.md) | Implemented, unit tested |
 | `ports::control` | `Command` (a request with its reply sender, or a reload), `ControlClient` and `ControlError` | Implemented |
 | `adapters::control` | `ControlServer` (the 0600 Unix socket and its accept thread, removed on drop) and `UnixControlClient`; `socket_path` resolves the path from the config | Implemented, unit tested, tested against the daemon binary |
-| `adapters::display` | `SystemDisplayProvider`, `MirrorDisplay`, `MirrorMonitor`, `X11RandrDisplay`, `X11MonitorGuard`, `RandrBackend`, `XRandr`, `ScreenSize`, `RecoveryStore`, `RecoveryState`, `RecoveryOutcome` |
+| `adapters::display` | `SystemDisplayProvider`, `MirrorDisplay`, `MirrorMonitor`, `PortalVirtualDisplay`, `PortalMonitor`, `PortalSource`, `TokenStore`, `X11RandrDisplay`, `X11MonitorGuard`, `RandrBackend`, `XRandr`, `ScreenSize`, `RecoveryStore`, `RecoveryState`, `RecoveryOutcome` |
 | `app::supervisor` | `Supervisor`, the single owner of the live settings: handles `Command`s, validates and classifies each change with `plan_change_with`, applies it through a `PipelineHandle` or rejects it, and answers `status` and `get`. Config reload and SIGHUP use the same path. See [control.md](control.md#changing-settings) | Implemented, unit tested |
 | `core::reconfig::transaction` | The `Reconfig` transaction over a `ReconfigTarget`: prepare, commit, verify and rollback as typestates | Implemented, unit tested |
 | `core::reconfig::keys` | The names of the live settings on the control interface: `SettingKey`, `setting_values`, `changed_keys` and `answer_read`, which answers `status` and `get` | Implemented, unit tested |
@@ -61,7 +61,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `tools::bench` | CPU time measurement of capture plus encode | Implemented, unit tested. Measurement on the target host is pending |
 | `ports::capture` | `Frame` and `PixelFormat` types, `CaptureBackend` trait and `CaptureError`. See [capture.md](capture.md) | Implemented, unit tested |
 | `adapters::capture` | `create_backend` and session detection, XShm X11 backend (`x11_shm`), portal and PipeWire Wayland backend (`wayland_portal`, feature `capture-wayland`) | Implemented. X11 verified against Xvfb. Wayland requires on-session validation. See [capture.md](capture.md) |
-| `adapters::display` | `SystemDisplayProvider` gathers `DisplayFacts` from the X server through RandR (outputs and their rectangles, RandR version, a free output) and from the environment on Wayland, and builds `MirrorDisplay`, which hands out the rectangle of an existing output, and `X11RandrDisplay`, which makes monitors through RandR as a real output or a bare monitor and undoes them on drop, with the recovery file in `recovery`. See [virtual-display.md](virtual-display.md) | Implemented. Facts verified on Xorg with the dummy driver, see [hardware-validation.md](hardware-validation.md) |
+| `adapters::display` | `SystemDisplayProvider` gathers `DisplayFacts` from the X server through RandR (outputs and their rectangles, RandR version, a free output) and from the environment on Wayland, and builds `MirrorDisplay`, which hands out the rectangle of an existing output, `PortalVirtualDisplay`, which asks the desktop portal for a virtual source and reads the portal's source types, and `X11RandrDisplay`, which makes monitors through RandR as a real output or a bare monitor and undoes them on drop, with the recovery file in `recovery`. See [virtual-display.md](virtual-display.md) | Implemented. Facts verified on Xorg with the dummy driver, see [hardware-validation.md](hardware-validation.md) |
 
 ## Types per directory
 
@@ -114,7 +114,7 @@ Placement, name and backend changes in mirror mode need no action; the new value
 |---|---|---|
 | `tools` | yes | Compiles the `tools` module and the `replay`, `isolate` and `bench` subcommands. Without it the library and the `discover`, `capture` and `run` commands still build, which shows that core, ports, adapters and app do not depend on the tools |
 | `testing` | no | Compiles `testing::fake_dock`. The crate enables it for its own tests through a dev-dependency on itself, so `cargo test` always includes it and a normal or release build never does |
-| `capture-wayland` | no | Wayland capture backend |
+| `capture-wayland` | no | Wayland capture backend and the portal display, built into the packages |
 | `encode-ffmpeg` | no | libx264 encoder |
 
 ## Layering rules

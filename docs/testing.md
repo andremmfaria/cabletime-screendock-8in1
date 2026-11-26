@@ -10,7 +10,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-CI runs the same checks, plus a clippy run with `--features capture-wayland` after installing the PipeWire development packages, and a separate `encode-ffmpeg` job that installs the libav development packages and runs clippy and the full test suite with `--features encode-ffmpeg`. No default test needs a dock, a hidraw node or a physical display. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`.
+CI runs the same checks, plus a clippy run with `--features capture-wayland` after installing the PipeWire development packages, one clippy run with `--features encode-ffmpeg,capture-wayland`, and a separate `encode-ffmpeg` job that installs the libav development packages and runs clippy and the full test suite with `--features encode-ffmpeg`. No default test needs a dock, a hidraw node or a physical display. Hardware access is replaced by a regular file or pipe through `HidrawHandle::from_file`.
 
 ## Test groups
 
@@ -119,6 +119,8 @@ Status: this feature does not compile on hosts without the libav development fil
 A headless compositor (Weston or a wlroots compositor with a PipeWire and portal setup) is needed to exercise `WaylandPortalCapture` without a desktop. The default host has none of these, so the Wayland backend has no automated runtime test. Its compile check is the CI feature build.
 
 Status: requires validation.
+
+The portal virtual display is unit tested against a mocked portal source: restore token reuse and replacement, the start timeout, closing a late stream, closing the session on drop and the resize rules. These tests run in every build.
 
 ## Capture, Stage 2: real desktop
 

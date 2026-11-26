@@ -13,7 +13,7 @@ CI builds a `.deb`, an `.rpm` and a `.crate` for each version and attaches them 
 | `/usr/lib/systemd/user/screendockd.service` | The systemd user unit |
 | `/etc/screendockd/screendock_cfg.toml` | Template config, third in the [resolution order](configuration.md#config-file) |
 
-The runtime libraries come from the distribution: dependencies are derived from the binary for the `.deb`, and `ffmpeg-libs` is required by the `.rpm`.
+The packages are built with the `encode-ffmpeg` and `capture-wayland` features. The runtime libraries come from the distribution: dependencies are derived from the binary for the `.deb`, which also names `libpipewire-0.3-0t64` or `libpipewire-0.3-0` explicitly, and the `.rpm` requires `ffmpeg-libs` and `pipewire-libs`. Both packages recommend `xdg-desktop-portal`, which a Wayland desktop uses to hand out screen streams. A Wayland session also needs a running PipeWire and a portal backend for its compositor (`xdg-desktop-portal-gnome`, `xdg-desktop-portal-wlr` or `xdg-desktop-portal-kde`); the packages do not require them.
 
 ## Permissions
 

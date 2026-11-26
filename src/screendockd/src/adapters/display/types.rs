@@ -146,3 +146,62 @@ pub(super) const RECOVERY_FILE: &str = "vdisplay-state.json";
 pub(super) const RECOVERY_MAX_BYTES: u64 = 64 * 1024;
 /// Prefix of the modes the daemon creates, so they are recognised on recovery.
 pub(super) const MODE_PREFIX: &str = "screendockd-";
+
+/// What a portal source is asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortalRequest {
+    /// The size the virtual monitor should have; the portal may ignore it.
+    pub size: (u32, u32),
+    /// The token of an earlier session, so the portal can skip its prompt.
+    pub restore_token: Option<String>,
+}
+
+/// A started portal stream. Dropping `keepalive` closes the portal session.
+pub struct PortalStream {
+    /// The PipeWire node that carries the frames.
+    pub node_id: u32,
+    /// The size the portal reports for the stream, when it reports one.
+    pub size: Option<(u32, u32)>,
+    /// The token to present next time, when the portal issued one.
+    pub restore_token: Option<String>,
+    pub keepalive: Box<dyn Send>,
+}
+
+/// Opens a portal ScreenCast session for a virtual source. Implementations talk to the
+/// portal; the display around it adds the start timeout and the restore token handling.
+pub trait PortalSource: Send + Sync {
+    fn start(&self, request: &PortalRequest) -> Result<PortalStream, VdisplayError>;
+}
+
+/// The restore token file of the portal source, written with owner-only permissions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenStore {
+    pub(super) path: PathBuf,
+}
+
+/// Makes virtual monitors through the portal's virtual source type.
+#[derive(Clone)]
+pub struct PortalVirtualDisplay {
+    pub(super) source: std::sync::Arc<dyn PortalSource>,
+    pub(super) timeout: std::time::Duration,
+    pub(super) tokens: Option<TokenStore>,
+}
+
+/// A monitor backed by a portal stream. Dropping it closes the portal session.
+pub struct PortalMonitor {
+    pub(super) rect: Rect,
+    pub(super) node_id: u32,
+    pub(super) _stream: Box<dyn Send>,
+}
+
+/// How long the portal gets to start a stream before the display gives up.
+pub const DEFAULT_PORTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+/// Longest restore token read back from the token file.
+pub(super) const MAX_TOKEN_LEN: usize = 256;
+/// File name of the restore token below the state directory.
+pub(super) const TOKEN_FILE: &str = "portal-restore-token";
+
+/// The portal source that talks to `xdg-desktop-portal` over D-Bus.
+#[cfg(feature = "capture-wayland")]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AshpdPortalSource;

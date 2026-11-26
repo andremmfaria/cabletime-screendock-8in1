@@ -445,6 +445,12 @@ pub trait VirtualMonitor: Send {
 
     /// Changes the monitor to `spec`.
     fn resize(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError>;
+
+    /// The PipeWire node that carries the monitor's frames, for monitors that live on a
+    /// Wayland compositor and are captured through a stream.
+    fn pipewire_node(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// One way of making virtual monitors.
