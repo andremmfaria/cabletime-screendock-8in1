@@ -279,7 +279,13 @@ impl EncoderPipeline {
         Self {
             state,
             baseline: None,
+            area: None,
         }
+    }
+
+    /// Sets the capture area later changes carry, until another one is set.
+    pub fn set_area(&mut self, area: CaptureArea) {
+        self.area = Some(area);
     }
 
     /// Publishes `knobs`, waits for the video loop to apply them and, when that fails, puts
@@ -307,8 +313,7 @@ impl EncoderPipeline {
 
     fn knobs_of(&self, settings: &LiveSettings) -> PipelineKnobs {
         PipelineKnobs {
-            // Placement is not part of the live settings yet; the area stays as it is.
-            area: self.state.knobs().area,
+            area: self.area.unwrap_or_else(|| self.state.knobs().area),
             ..PipelineKnobs::from_live(settings)
         }
     }

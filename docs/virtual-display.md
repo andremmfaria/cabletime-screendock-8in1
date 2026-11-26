@@ -44,3 +44,30 @@ X server state outlives the client, so a daemon that is killed would leave its m
 - A file larger than 64 KiB or that does not parse is an error.
 
 A failed step during creation undoes the steps before it and removes the file.
+
+## Switching modes while the daemon runs
+
+`ctl set mode extend` and `ctl set mode mirror` switch between a virtual monitor and the whole desktop without restarting the daemon, and `ctl reload` applies a changed `[virtual_display]` section the same way. The switch goes through the change transaction of [control.md](control.md): prepare checks that the desktop can host a monitor and encodes a test frame, commit creates or removes the monitor, retargets capture and rebuilds the encoder with a fresh keyframe, verify watches the session. A failed step is rolled back, which removes a monitor that was just created. Without a handshake (`--no-handshake`) a switch that keeps the picture size needs no dock cycle.
+
+| Change | Effect |
+|---|---|
+| `mode` to `extend` | the monitor is created at the placement and capture reads its rectangle |
+| `mode` to `mirror` | the monitor is removed and capture reads the whole desktop |
+| `placement`, `anchor`, `x`, `y` in extend mode | the monitor moves and capture follows |
+| `resolution`, `orientation` in extend mode | the monitor resizes, capture follows and the dock cycle runs |
+| `name`, `wayland-backend` in extend mode | the monitor is created again |
+
+When the daemon starts in extend mode and the desktop cannot host a monitor, the `fallback` setting decides: `mirror` logs the reason and mirrors, `fail` ends startup with the reason. A runtime switch to extend that cannot be done is rejected with the reason instead.
+
+On exit (SIGINT, SIGTERM or a normal end) the monitor is removed and the screen size restored.
+
+## Commands
+
+| Command | Output |
+|---|---|
+| `screendockd vdisplay probe` | the display server, desktop, RandR version, outputs with rectangles, a spare output, the mechanism extend mode would use, the placement it would compute and the configured mode |
+| `screendockd vdisplay cleanup` | undoes the changes recorded in the recovery file when its daemon is gone, and prints `restored the display layout`, `nothing to clean up`, or that a daemon is still running |
+
+`probe` needs a graphical session and prints a connection error without one. `cleanup` does nothing when the X server is gone.
+
+The systemd user unit runs `screendockd vdisplay cleanup` as `ExecStopPost`, which covers a daemon that was killed, and `ctl reload` as `ExecReload`. A new daemon also undoes a leftover monitor before it makes its own.

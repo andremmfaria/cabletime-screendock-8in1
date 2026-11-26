@@ -36,7 +36,7 @@ Log out and back in, replug the dock, and confirm access with `screendockd disco
 
 ## Service
 
-The unit is `PartOf` and `WantedBy` `graphical-session.target`, runs `/usr/bin/screendockd run`, and restarts on failure after two seconds. The daemon exits with an error after 100 consecutive failed frames so that this restart takes effect.
+The unit is `PartOf` and `WantedBy` `graphical-session.target`, runs `/usr/bin/screendockd run`, and restarts on failure after two seconds. `ExecReload` runs `screendockd ctl reload`, and `ExecStopPost` runs `screendockd vdisplay cleanup` so a monitor left by a killed daemon is removed; both need the same `DISPLAY` and `XAUTHORITY` as the daemon, and cleanup does nothing when the X server is gone. The daemon exits with an error after 100 consecutive failed frames so that this restart takes effect.
 
 ```text
 systemctl --user daemon-reload

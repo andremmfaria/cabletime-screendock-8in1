@@ -29,6 +29,7 @@ mod replay;
 mod run;
 mod support;
 pub mod types;
+mod vdisplay;
 
 use std::process::ExitCode;
 
@@ -59,5 +60,6 @@ pub fn run() -> Result<ExitCode> {
         #[cfg(feature = "tools")]
         Command::Bench(args) => done(bench::run(args, &config)),
         Command::Ctl(args) => ctl::run(args, &config),
+        Command::Vdisplay(args) => done(vdisplay::run(args, &config)),
     }
 }

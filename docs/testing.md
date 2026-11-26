@@ -63,6 +63,17 @@ Requirements: `Xorg` with the `dummy` driver (Debian and Ubuntu packages `xserve
 - When Xorg or the dummy driver is missing, or the server cannot start rootless, the tests print a skip note and pass.
 - With `SCREENDOCK_REQUIRE_XORG` set to any value, the same condition fails the test.
 
+## Virtual monitor in the daemon
+
+`tests/e2e/vdisplay_xorg.rs` runs the real binary on the Xorg dummy server with file nodes and `--no-handshake`:
+
+- `ctl set mode extend` and `mirror` create and remove a monitor at `+1280+0`, with the recovery file present exactly while the monitor exists, and a SIGTERM exit restores the monitor list and the screen size;
+- after SIGKILL the monitor stays, and `vdisplay cleanup` restores the layout and a second run prints that there is nothing to clean up;
+- a new daemon undoes the monitor a killed one left;
+- `vdisplay probe` prints the outputs, the extend mechanism and the placement.
+
+The unit tests of `app::monitor` use a fake display provider: switching creates and drops the monitor, resizes follow the picture size, an unsupported desktop changes nothing, the start fallback follows the policy and a resync reconciles the monitor with the settings.
+
 ## Control socket
 
 `adapters/control/server.rs` tests run the server in process against a stand-in daemon thread: the socket is mode 0600 inside a 0700 directory and is removed on drop, a stale socket file is replaced, a live socket is not taken over, a regular file at the path is left alone, an over-long path is refused, an oversized request line and malformed requests get an `invalid` answer without reaching the daemon, eight concurrent clients each get their own answer, a silent client does not block others, and requests are rejected once the daemon side is gone. `tests/protocol/control_wire.rs` pins the exact request and response lines, strictness and the line caps. `tests/e2e/control_socket.rs` runs `screendockd ctl status` and `ctl get` against the real daemon binary on Xvfb: the settings and version come back, an unknown key exits with code 4, a missing daemon exits with code 3, the socket is private, it is removed at exit and `control.enabled = false` creates none. Each daemon in the e2e tests gets its own `XDG_RUNTIME_DIR`, so parallel daemons never share a socket.

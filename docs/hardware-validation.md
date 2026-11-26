@@ -227,6 +227,8 @@ Monitors made by `X11RandrDisplay` on this server, each captured with exact pixe
 | Resize in both tiers | the listed geometry changes and the screen grows |
 | Leaked monitor, then recovery | removed, screen size restored, state file deleted |
 
+Run time switching with the daemon on this server (file nodes, no handshake): `ctl set mode extend` creates a tier 1 monitor `DUMMY1` at +1280+0, `mode mirror` removes it, SIGTERM restores the listing, and after SIGKILL `vdisplay cleanup` restores it.
+
 Whether a desktop environment's display settings list a bare tier 2 monitor, and whether a compositor paints it, requires validation on a real session.
 
 The `modesetting` driver on the i915 GPU cannot start without root here: Xorg reports `Cannot open /dev/tty0 (Permission denied)`, and `/dev/dri/card0` is `root:video` with mode 0660. Status: requires validation on a machine with a logged in X11 session and a real GPU driver.

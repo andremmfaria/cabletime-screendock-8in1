@@ -12,6 +12,8 @@ After=graphical-session.target
 
 [Service]
 ExecStart=/usr/bin/screendockd run
+ExecReload=/usr/bin/screendockd ctl reload
+ExecStopPost=/usr/bin/screendockd vdisplay cleanup
 Restart=on-failure
 RestartSec=2
 

@@ -48,6 +48,23 @@ pub(super) enum Command {
     Bench(BenchArgs),
     /// Talk to a running daemon through its control socket.
     Ctl(CtlArgs),
+    /// Inspect the desktop for virtual monitors and undo what a killed daemon left behind.
+    Vdisplay(VdisplayArgs),
+}
+
+#[derive(Debug, Args)]
+pub(super) struct VdisplayArgs {
+    #[command(subcommand)]
+    pub(super) action: VdisplayAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum VdisplayAction {
+    /// Print what the desktop offers and which mechanism the configuration would use.
+    Probe,
+    /// Undo the display changes of a daemon that did not exit cleanly. Does nothing when
+    /// there are none, or when the X server is gone.
+    Cleanup,
 }
 
 #[derive(Debug, Args)]

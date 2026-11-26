@@ -11,12 +11,14 @@ use thiserror::Error;
 use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::session::{SessionError, SessionHandle, SessionSettings};
 use crate::ports::capture::{CaptureArea, CaptureBackend};
+use crate::ports::display::{DisplayProvider, VirtualMonitor};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings};
 use crate::ports::transport::EdidStore;
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::ReportId;
 use crate::utils::config::X264Preset;
 use crate::utils::types::EdidSource;
+use crate::utils::types::VirtualDisplayConfig;
 
 /// Consecutive failed frames after which the daemon gives up.
 pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
@@ -232,6 +234,24 @@ pub struct EncoderPipeline {
     pub(super) state: Arc<PipelineState>,
     /// Session losses and written messages when the last change was applied.
     pub(super) baseline: Option<(u64, u64)>,
+    /// The capture area the monitor management chose; `None` keeps the one in the state.
+    pub(super) area: Option<CaptureArea>,
+}
+
+/// Owns the virtual monitor of a running daemon: creates it, moves it, resizes it and removes
+/// it as the live settings change, and says which area of the desktop to capture.
+pub struct MonitorManager {
+    pub(super) provider: Box<dyn DisplayProvider>,
+    pub(super) base: VirtualDisplayConfig,
+    pub(super) monitor: Option<Box<dyn VirtualMonitor>>,
+}
+
+/// An [`EncoderPipeline`] that also manages the virtual monitor, so switching between mirror
+/// and extend, moving and resizing the monitor go through the same transaction as every other
+/// change.
+pub struct MonitorPipeline {
+    pub(super) inner: EncoderPipeline,
+    pub(super) monitors: MonitorManager,
 }
 
 /// How long a changed pipeline is watched for a session loss.

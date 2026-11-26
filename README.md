@@ -67,7 +67,7 @@ systemctl --user enable --now screendockd.service
 journalctl --user -u screendockd.service -f
 ```
 
-The unit runs `/usr/bin/screendockd run` and restarts it on failure. For a build from source, install the binary and a unit that points at it:
+The unit runs `/usr/bin/screendockd run`, restarts it on failure, reloads the config with `ctl reload` and runs `vdisplay cleanup` when the daemon stops. For a build from source, install the binary and a unit that points at it:
 
 ```text
 install -Dm755 target/release/screendockd ~/.local/bin/screendockd
@@ -95,6 +95,10 @@ screendockd run
 ```
 
 This discovers the dock, starts the heartbeat and the session handshake, and streams the desktop until SIGINT or SIGTERM. Use `RUST_LOG=debug` for more logging. `screendockd --help` lists every command.
+
+## Virtual monitor
+
+`screendockd ctl set mode extend` gives the dock a monitor of its own to the right of the primary output, and `ctl set mode mirror` goes back to showing the whole desktop. `screendockd vdisplay probe` shows what the desktop offers, and `screendockd vdisplay cleanup` removes a monitor a killed daemon left behind. See [docs/virtual-display.md](docs/virtual-display.md).
 
 ## Validation subcommands
 

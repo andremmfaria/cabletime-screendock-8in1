@@ -13,13 +13,16 @@ use signal_hook::iterator::Signals;
 
 use crate::adapters::capture::create_backend;
 use crate::adapters::control::{socket_path, ControlServer};
+use crate::adapters::display::SystemDisplayProvider;
 use crate::adapters::encode::create_encoder;
 use crate::adapters::transport::edid_cache::{default_path as edid_cache_path, FileEdidStore};
 use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
+use crate::app::monitor::{MonitorManager, MonitorPipeline};
 use crate::app::pipeline::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use crate::app::supervisor::{PipelineHandle, ReloadFn, Supervisor};
 use crate::core::reconfig::LiveSettings;
+use crate::ports::capture::{CaptureArea, CaptureTarget};
 use crate::ports::control::Command;
 use crate::ports::encode::EncoderSettings;
 use crate::utils::config::Config;
@@ -45,13 +48,29 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
     let mi01_handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
     let choice = args.backend.map_or(config.capture.backend, Into::into);
     let mut capture = create_backend(config, choice).context("failed to start capture")?;
+    let mut monitors = MonitorManager::new(
+        Box::new(SystemDisplayProvider::new()),
+        config.virtual_display.clone(),
+    );
+    let area = monitors.start(&live).map_err(|e| anyhow::anyhow!(e))?;
+    if area != CaptureArea::Whole {
+        capture
+            .retarget(CaptureTarget {
+                area,
+                fps: live.fps,
+            })
+            .context("failed to point capture at the monitor")?;
+    }
     let settings = EncoderSettings::from_config(config, geometry);
     let mut encoder =
         create_encoder(&args.encoder.kind(), settings).context("failed to start encoder")?;
     let stop = shutdown_flag()?;
     let kind = args.encoder.kind();
     let pipeline = PipelineState::with_builder(
-        PipelineKnobs::from_live(&live),
+        PipelineKnobs {
+            area,
+            ..PipelineKnobs::from_live(&live)
+        },
         encoder.supports_live_rate(),
         EncoderBuilder::new(move |settings| create_encoder(&kind, settings)),
     );
@@ -66,7 +85,10 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         config,
         live,
         reload_source(config_path.cloned()),
-        Box::new(EncoderPipeline::new(std::sync::Arc::clone(&pipeline))),
+        Box::new(MonitorPipeline::new(
+            EncoderPipeline::new(std::sync::Arc::clone(&pipeline)),
+            monitors,
+        )),
     )?;
     tracing::info!(
         capture = capture.name(),
