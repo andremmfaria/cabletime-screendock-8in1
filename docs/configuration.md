@@ -71,7 +71,7 @@ Discovery runs only when a node needed by the command was not given on the comma
 The dock's hidraw nodes need to be readable and writable by the user running the daemon. `deploy/99-screendock.rules` grants the `screendock` group access to the dock's hidraw nodes. Install it to `/etc/udev/rules.d/`, create the group, add the user, and reload:
 
 ```text
-sudo groupadd screendock
+sudo groupadd --system screendock
 sudo usermod -aG screendock "$USER"
 sudo cp deploy/99-screendock.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger

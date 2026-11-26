@@ -13,6 +13,7 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [encoding.md](encoding.md) | Encoder trait, libx264 and prerecorded encoders, message policy, the `bench` CPU measurement |
 | [daemon.md](daemon.md) | The `run` daemon: startup, loops, error policy, shutdown, resolution picker, device section |
 | [testing.md](testing.md) | Test layers, how to run them, and what each one covers |
+| [install.md](install.md) | Installing from packages or source, permissions, the systemd user unit, running and troubleshooting |
 | [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing (M2) and heartbeat isolation (M3), the streaming daemon (M6), the resolution picker (M7), and what to record |
 
 ## Device and research pages
@@ -26,4 +27,4 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [reviews-and-caveats.md](reviews-and-caveats.md) | Reviews and caveats |
 | [sources.md](sources.md) | Sources |
 | [implementation-plan.md](implementation-plan.md) | Implementation plan and milestones |
-| [research/](research/) | Protocol research, including `full-protocol-spec-2026-11-21.md` |
+| [research/](research/) | Protocol research, including the full protocol specification |

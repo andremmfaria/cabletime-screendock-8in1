@@ -1,7 +1,7 @@
 # CABLETIME ScreenDock - Real-World Feedback, Firmware/Driver Notes, Caveats
 
 ## Review coverage found
-This product is very new (Kickstarter campaign Aug 6 - Sep 20, 2026; general retail from ~Oct-Nov 2026), so independent long-term user feedback (Reddit threads, forum complaint posts, post-purchase reviews) is essentially **not yet available**. Targeted searches for "CABLETIME ScreenDock reddit", Kickstarter comment threads, and forum caveats did not surface substantive user complaint threads - only: a TechPowerUp news post (10 comments, general reaction to pricing/concept, no reported hands-on defects), a New Atlas hands-on preview, and one detailed YouTube unboxing/walkthrough. Treat the lack of a user-complaint trail as "too new to have one yet," not as evidence of a clean track record.
+This product is very new (a recent Kickstarter launch followed by general retail), so independent long-term user feedback (Reddit threads, forum complaint posts, post-purchase reviews) is essentially **not yet available**. Targeted searches for "CABLETIME ScreenDock reddit", Kickstarter comment threads, and forum caveats did not surface substantive user complaint threads - only: a TechPowerUp news post (10 comments, general reaction to pricing/concept, no reported hands-on defects), a New Atlas hands-on preview, and one detailed YouTube unboxing/walkthrough. Treat the lack of a user-complaint trail as "too new to have one yet," not as evidence of a clean track record.
 
 ## Hands-on observations (New Atlas, pre-release hands-on)
 - Ports are placed on only two sides of the unit, letting it be stood upright and used like a photo frame.
@@ -24,7 +24,7 @@ This product is very new (Kickstarter campaign Aug 6 - Sep 20, 2026; general ret
 - No firmware-update mechanism is mentioned anywhere (this is a driver-dependent peripheral, not a device with its own flashable firmware, as far as documented).
 
 ## Price/value commentary
-- Forbes and New Atlas both frame the Kickstarter pricing ($109-$119 early-bird vs. a projected $169 retail) as a meaningful discount; post-campaign retail settled at $139 (from a $159 list) on CABLETIME's own store - i.e., current buyers are paying close to, but a bit under, what Forbes projected as MSRP.
+- Forbes and New Atlas both frame the Kickstarter pricing ($109-$119 early-bird vs. a projected $169 retail) as a meaningful discount; post-campaign retail is $139 (from a $159 list) on CABLETIME's own store - i.e., current buyers are paying close to, but a bit under, what Forbes projected as MSRP.
 - No comparative review was found benchmarking ScreenDock's small-screen usefulness against plain USB-powered portable monitors (New Atlas only mentions this category in passing, pointing to a $50-100 "budget pick from Anker" dock as a point of contrast but not a head-to-head test).
 
 ## Bottom line on confidence

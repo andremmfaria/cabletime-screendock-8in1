@@ -7,7 +7,7 @@ Milestones covered: M2 (native write timing), M3 (heartbeat dependency isolation
 ## Preparation
 
 1. Connect the dock's USB-C cable to the Linux host.
-2. Build: `cd src/screendockd && cargo build --release`. The binary is `target/release/screendockd`.
+2. Build: `cd src/screendockd && cargo build --release --features encode-ffmpeg`. The binary is `target/release/screendockd`.
 3. Set up permissions as described in [configuration.md](configuration.md#permissions) so no `sudo` is needed.
 4. Confirm discovery: `screendockd discover`. It prints the MI_00 and MI_01 nodes. Record both paths and the kernel version (`uname -r`).
 5. Generate a real, decodable stream for the dock. ffmpeg needs `-pix_fmt yuv420p` for the baseline profile:

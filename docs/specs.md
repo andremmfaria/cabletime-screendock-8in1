@@ -7,7 +7,7 @@ Source of the core table: official CABLETIME product page spec sheet, cross-chec
 |---|---|
 | Model | CB09W |
 | SKU | CT-DKS9-PW |
-| Brand / Manufacturer | CABLETIME (Ningbo Cabletime Electronics Co., Ltd., Ningbo, China; founded 2007) |
+| Brand / Manufacturer | CABLETIME (Ningbo Cabletime Electronics Co., Ltd., Ningbo, China) |
 | Product family | "ScreenDock" - distinct from CABLETIME's other docks (e.g. CB14G 15-in-1, 20-in-1 Thunderbolt dock, 10-in-1 hub) |
 
 ## Port list / layout (8-in-1)

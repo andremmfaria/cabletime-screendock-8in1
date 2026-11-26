@@ -1,6 +1,6 @@
 # Protocol implementation
 
-This page describes how the wire protocol from `research/full-protocol-spec-2026-11-21.md` is implemented. The research document is the source for the wire facts.
+This page describes how the wire protocol from the protocol specification under `research/` is implemented. The research document is the source for the wire facts.
 
 ## Chunk layout
 
@@ -57,4 +57,3 @@ The MI_00 message is JSON-RPC:
 
 - The `reset` JSON-RPC method (direction unresolved in the research).
 - Any input or touch path.
-- Capture and encode (stubs).

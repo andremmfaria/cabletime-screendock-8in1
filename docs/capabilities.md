@@ -35,23 +35,9 @@ No source documents more than this 3-screen (laptop + ScreenDock + 1 HDMI) confi
 
 ## Port usage: does the display need anything beyond HOST? [confirmed, verified against live hardware]
 
-No. CABLETIME's own user guide
-(cabletimetech.com/blogs/knowledge/cabletime-screendock-ct-dks9-pw-user-guide)
-is explicit: "Keep ScreenDock connected to your computer through HOST...
-Leave the dock's other ports empty for now. You do not need to add a
-charger to install USB Display. A charger alone cannot show computer
-content on the small screen." The guide treats the external HDMI output as
-an independent path from the built-in screen ("Its working picture does
-not confirm that the computer can send video to an HDMI monitor through
-its USB-C port").
+No. CABLETIME's own user guide (cabletimetech.com/blogs/knowledge/cabletime-screendock-ct-dks9-pw-user-guide) is explicit: "Keep ScreenDock connected to your computer through HOST... Leave the dock's other ports empty for now. You do not need to add a charger to install USB Display. A charger alone cannot show computer content on the small screen." The guide treats the external HDMI output as an independent path from the built-in screen ("Its working picture does not confirm that the computer can send video to an HDMI monitor through its USB-C port").
 
-Verified directly on this host's live USB topology: the display's
-composite device (Actions `1de1:f201`) hangs off the same internal hub
-chain as the HOST connector, already fully enumerated and reachable via
-`/dev/hidraw0`/`hidraw1` with only the HOST cable connected, no PD
-charger, card, Ethernet, or HDMI cable attached. See
-docs/research/display-protocol-reverse-engineering.md for the raw HID
-report layout being reverse-engineered on those two interfaces.
+Verified directly on this host's live USB topology: the display's composite device (Actions `1de1:f201`) hangs off the same internal hub chain as the HOST connector, already fully enumerated and reachable via `/dev/hidraw0`/`hidraw1` with only the HOST cable connected, no PD charger, card, Ethernet, or HDMI cable attached. See docs/research/display-protocol-reverse-engineering.md for the raw HID report layout being reverse-engineered on those two interfaces.
 
 ## Hard limitations
 - No standalone OS, no Wi-Fi, no built-in apps - it is 100% dependent on the connected PC/Mac being powered on and running USB Display.
