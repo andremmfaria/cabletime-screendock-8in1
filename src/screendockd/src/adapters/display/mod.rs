@@ -55,6 +55,7 @@ impl SystemDisplayProvider {
             x11_display: Some(display.into()),
             recovery: None,
             sway_socket: None,
+            mutter_bus: None,
         }
     }
 
@@ -63,6 +64,15 @@ impl SystemDisplayProvider {
     pub fn for_sway(socket: impl Into<std::path::PathBuf>) -> Self {
         Self {
             sway_socket: Some(socket.into()),
+            ..Self::default()
+        }
+    }
+
+    /// A provider for the GNOME Shell whose session bus is at `address`, whatever the
+    /// environment says.
+    pub fn for_mutter(address: impl Into<String>) -> Self {
+        Self {
+            mutter_bus: Some(address.into()),
             ..Self::default()
         }
     }
@@ -93,12 +103,21 @@ impl DisplayProvider for SystemDisplayProvider {
                 ..DisplayFacts::default()
             });
         }
+        if let Some(address) = &self.mutter_bus {
+            return Ok(DisplayFacts {
+                server: DisplayServer::Wayland,
+                desktop: "GNOME".into(),
+                mutter_screencast: probe_screencast(Some(address), PORTAL_PROBE_TIMEOUT),
+                ..DisplayFacts::default()
+            });
+        }
         match &self.x11_display {
             Some(display) => x11_facts(Some(display)),
             None => {
                 let mut facts = session_facts(|name| std::env::var(name).ok())?;
                 if facts.server == DisplayServer::Wayland {
                     facts.portal_source_types = probe_source_types(PORTAL_PROBE_TIMEOUT);
+                    facts.mutter_screencast = probe_screencast(None, PORTAL_PROBE_TIMEOUT);
                     if let Some(socket) = std::env::var_os("SWAYSOCK").filter(|v| !v.is_empty()) {
                         match sway_output_facts(std::path::Path::new(&socket)) {
                             Ok(outputs) => facts.outputs = outputs,
@@ -133,9 +152,17 @@ impl DisplayProvider for SystemDisplayProvider {
                 None => WlrootsHeadlessDisplay::from_env()?,
             })),
             #[cfg(feature = "capture-wayland")]
+            ExtendBackend::Mutter => Ok(Box::new(MutterVirtualDisplay::new(std::sync::Arc::new(
+                match &self.mutter_bus {
+                    Some(address) => ZbusMutterConnector::with_address(address.clone()),
+                    None => ZbusMutterConnector::new(),
+                },
+            )))),
+            #[cfg(feature = "capture-wayland")]
             ExtendBackend::Portal => Ok(Box::new(PortalVirtualDisplay::new(std::sync::Arc::new(
                 AshpdPortalSource,
             )))),
+            #[cfg(not(feature = "capture-wayland"))]
             other => Err(VdisplayError::Unsupported(format!(
                 "{other:?} is not available in this build"
             ))),

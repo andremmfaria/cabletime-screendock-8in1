@@ -57,7 +57,7 @@ Status: the portal display is tested against a mocked portal (token handling, ti
 
 Measured on headless GNOME Shell 50.1 (see [hardware-validation.md](hardware-validation.md)): the stream is `BGRx`, the frames come at the requested size (1280x720, 1600x900 and 800x600 were asked for and delivered), the first consumer of a new node gets a frame at once, and later frames come when the shell repaints the monitor. A desktop that is not repainted produces no further frames, and a new consumer or a new size on a node that was already read gets a frame only after the next repaint.
 
-Status: validated on headless GNOME Shell with a software renderer. A headless shell has no client on the virtual monitor (a Wayland client sees only the output made with `--virtual-monitor`), so the frames show the shell's background. GNOME on a real GPU session requires validation, using the checklist in [hardware-validation.md](hardware-validation.md).
+Status: validated on headless GNOME Shell with a software renderer: the provider reports the service and the policy picks Mutter, and switching the mode through the monitor manager creates the monitor, delivers frames of the configured size through the capture and removes the node again. A headless shell has no client on the virtual monitor (a Wayland client sees only the output made with `--virtual-monitor`), so the frames show the shell's background. GNOME on a real GPU session requires validation, using the checklist in [hardware-validation.md](hardware-validation.md).
 
 ## Sway headless output
 
@@ -71,6 +71,12 @@ Status: validated on headless GNOME Shell with a software renderer. A headless s
 - The IPC client reads replies of at most 1 MiB, checks the magic and message type, and parses JSON into typed fields.
 
 Capturing the output's frames through `xdg-desktop-portal-wlr` without a prompt (the portal's `chooser_type=none` with an `output_name`) has not been tried. Status: requires validation. A sway output is a rectangle of the desktop, and the Wayland capture backend captures a whole desktop or a PipeWire node, not a rectangle, so extend mode on sway creates the output and then mirrors under the `mirror` fallback; a runtime switch to extend is rejected with the capture backend's reason.
+
+## Choosing the Wayland mechanism
+
+`wayland_backend` selects the mechanism. With `auto` the order is Mutter on GNOME when `org.gnome.Mutter.ScreenCast` has an owner on the session bus, a headless output on sway when `$SWAYSOCK` is reachable, the portal where its `AvailableSourceTypes` includes the virtual bit, and otherwise mirror with the reason. `mutter`, `portal` and `wlroots` force one mechanism. The provider asks the bus for the Mutter service and the portal for its source types once per facts query, each within 3 seconds, and treats an answer that does not come as absent. `vdisplay probe` prints the mechanism extend mode would use.
+
+Starting in extend mode on GNOME creates the Mutter monitor first and then attaches the capture to its node, so no portal prompt appears. `ctl set mode extend` and `ctl set mode mirror` switch at run time through the same transaction as on X11: extend creates the monitor and retargets the capture to the node, mirror removes the monitor and retargets the capture to the whole desktop, which opens the portal session. On a desktop without a portal that last step fails and the change is rolled back.
 
 ## Placement
 

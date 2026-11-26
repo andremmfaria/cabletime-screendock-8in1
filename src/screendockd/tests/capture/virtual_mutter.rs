@@ -12,9 +12,17 @@ use std::time::Duration;
 
 use crate::support::{require_mutter, MutterHeadless};
 use screendockd::adapters::capture::wayland_portal::WaylandPortalCapture;
-use screendockd::adapters::display::{MutterVirtualDisplay, ZbusMutterConnector};
+use screendockd::adapters::display::{
+    MutterVirtualDisplay, SystemDisplayProvider, ZbusMutterConnector,
+};
+use screendockd::app::monitor::MonitorManager;
+use screendockd::core::display_policy::{decide, DisplayDecision};
+use screendockd::core::reconfig::{plan_change_with, LiveSettings, PlanOptions, SettingsPatch};
 use screendockd::ports::capture::{CaptureArea, CaptureBackend, CaptureTarget, Frame, PixelFormat};
+use screendockd::ports::display::{DisplayProvider, DisplayServer, ExtendBackend};
 use screendockd::ports::display::{MonitorName, MonitorSpec, Rect, VirtualDisplay};
+use screendockd::utils::config::{load_from_path, VirtualDisplayConfig};
+use screendockd::utils::types::DisplayMode;
 
 const FRAME_WAIT: Duration = Duration::from_secs(60);
 
@@ -182,4 +190,87 @@ fn mutter_stream_node_is_removed_when_the_monitor_drops() {
         std::thread::sleep(Duration::from_millis(100));
     }
     assert!(gone, "node {node} still exists after the monitor dropped");
+}
+
+fn shipped() -> LiveSettings {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/screendock_cfg.toml"
+    );
+    LiveSettings::try_from(&load_from_path(std::path::Path::new(path)).unwrap()).unwrap()
+}
+
+#[test]
+fn provider_facts_of_a_gnome_shell_choose_the_mutter_display() {
+    let Some(shell) = require_mutter() else {
+        return;
+    };
+    let facts = SystemDisplayProvider::for_mutter(shell.bus_address.clone())
+        .facts()
+        .unwrap();
+    assert_eq!(facts.server, DisplayServer::Wayland);
+    assert!(facts.mutter_screencast);
+    let extend = VirtualDisplayConfig {
+        mode: DisplayMode::Extend,
+        ..VirtualDisplayConfig::default()
+    };
+    assert_eq!(
+        decide(&facts, &extend).unwrap(),
+        DisplayDecision::Extend(ExtendBackend::Mutter)
+    );
+}
+
+#[test]
+fn switching_the_mode_creates_the_stream_monitor_and_removes_it_again() {
+    let Some(shell) = require_mutter() else {
+        return;
+    };
+    let mut monitors = MonitorManager::new(
+        Box::new(SystemDisplayProvider::for_mutter(shell.bus_address.clone())),
+        VirtualDisplayConfig::default(),
+    );
+    let mirror = shipped();
+    assert_eq!(monitors.start(&mirror), Ok(CaptureArea::Whole));
+
+    let extend = SettingsPatch {
+        mode: Some(DisplayMode::Extend),
+        ..SettingsPatch::default()
+    }
+    .apply_to(&mirror)
+    .unwrap();
+    let plan = plan_change_with(&mirror, &extend, PlanOptions::default());
+    let area = monitors.apply(&plan, &extend).unwrap();
+    let CaptureArea::Stream {
+        node,
+        width,
+        height,
+    } = area
+    else {
+        panic!("expected a stream area, got {area:?}");
+    };
+    assert_eq!((width, height), (1280, 720));
+    let capture =
+        WaylandPortalCapture::connect_stream(Some(&shell.pipewire_remote), node, width, height, 25)
+            .unwrap();
+    let (capture, frame) = frame_within(Box::new(capture), FRAME_WAIT);
+    let frame = frame.unwrap();
+    assert_eq!((frame.width, frame.height), (1280, 720));
+    drop(capture);
+
+    let plan = plan_change_with(&extend, &mirror, PlanOptions::default());
+    assert_eq!(monitors.apply(&plan, &mirror), Ok(CaptureArea::Whole));
+    let Some(_) = shell.pipewire_node_ids() else {
+        return;
+    };
+    for _ in 0..50 {
+        if !shell
+            .pipewire_node_ids()
+            .unwrap()
+            .contains(&u64::from(node))
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("node {node} still exists after switching to mirror");
 }

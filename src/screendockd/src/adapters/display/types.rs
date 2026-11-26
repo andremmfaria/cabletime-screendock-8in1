@@ -28,6 +28,8 @@ pub struct SystemDisplayProvider {
     pub(super) recovery: Option<RecoveryStore>,
     /// The sway IPC socket to use; `None` uses `$SWAYSOCK`.
     pub(super) sway_socket: Option<PathBuf>,
+    /// The session bus address of a Mutter to use; `None` uses `$DBUS_SESSION_BUS_ADDRESS`.
+    pub(super) mutter_bus: Option<String>,
 }
 
 /// Size of the X screen (the framebuffer) in pixels and millimetres.

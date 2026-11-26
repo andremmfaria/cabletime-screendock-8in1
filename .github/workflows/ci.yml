@@ -83,6 +83,19 @@ jobs:
       - name: Lint with capture-wayland feature
         run: cargo clippy --all-targets --features capture-wayland -- -D warnings
 
+      # The Mutter tests start a headless GNOME Shell with its own session bus, PipeWire and
+      # WirePlumber. They skip when the shell cannot run on the runner, so REQUIRE_MUTTER stays
+      # unset here.
+      - name: Install headless GNOME packages
+        run: >
+          sudo apt-get install -y gnome-shell mutter dbus pipewire wireplumber
+          gstreamer1.0-tools gstreamer1.0-pipewire pipewire-bin
+
+      - name: Test with capture-wayland feature
+        run: cargo test --features capture-wayland --verbose
+        env:
+          SCREENDOCK_REQUIRE_XVFB: "1"
+
   # First real compile of the libx264 encoder: needs the libav development files, clang for
   # bindgen, and the ffmpeg binary so the test can decode what the encoder produced.
   encode-ffmpeg:

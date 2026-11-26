@@ -279,6 +279,20 @@ The environment has `XDG_SESSION_TYPE=wayland` and `XDG_CURRENT_DESKTOP=GNOME`, 
 
 Frames are produced when the shell repaints. A node delivers a frame to its first consumer at once; a second consumer of the same node, or a new size negotiated on a node that was already read, gets a frame only after the next repaint, which does not happen while nothing changes. A Wayland client sees only the output made with `--virtual-monitor`, not the `RecordVirtual` monitor, so no client can be drawn on it and the frames show the shell background.
 
+GNOME on Wayland checklist for a machine with a real GPU session. Record the machine, `gnome-shell --version`, `echo $XDG_SESSION_TYPE`, the GPU and driver, the PipeWire version, the `xdg-desktop-portal` and `xdg-desktop-portal-gnome` versions, and pass or fail per line with the log file names.
+
+1. Read the portal `AvailableSourceTypes` and `version` and save the output (headless it was 0).
+2. Run `screendockd vdisplay probe` and save the output.
+3. With `wayland_backend = "mutter"`, check the interface version with `gdbus introspect`, that extend mode starts, that the dock shows the monitor at the configured size, whether the monitor appears in Settings, Displays, and where Mutter places it.
+4. With `wayland_backend = "portal"`, record the prompt, whether the restore token avoids it on the second start, the stream size, and whether the monitor appears in Settings, Displays.
+5. Drag a window onto the monitor and check the picture, the frame rate and the CPU use against the figure in [encoding.md](encoding.md).
+6. Change the size from Settings if the monitor is listed, else with `ctl set resolution`, and record whether the stream renegotiates and whether the dock cycle runs once.
+7. Toggle `ctl set mode mirror` and `extend`, and the config file plus `ctl reload`.
+8. Kill the daemon with SIGKILL and check that no monitor remains; lock the screen, suspend and resume.
+9. Force a failure (stop the portal, or deny a prompt) and check the fallback to mirror with a logged reason.
+
+Validated GPU driver: the development host has an Intel JasperLake UHD with the `i915` kernel driver, but GNOME Shell ran without GPU access there, so no GPU driver is validated for the Wayland paths. Capture uses shared memory buffers only, so no code path depends on the driver.
+
 Not verified: GNOME on a real GPU session (lock screen, suspend, the Settings display page, buffer negotiation with a GPU), the portal virtual source, and the position Mutter gives the monitor. Status: requires validation.
 
 ## Dry runs without a dock
