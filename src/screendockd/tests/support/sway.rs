@@ -14,6 +14,7 @@ use screendockd::adapters::display::SwayIpc;
 
 pub struct SwayHeadless {
     child: Child,
+    _serial: std::sync::MutexGuard<'static, ()>,
     pub runtime: tempfile::TempDir,
     pub ipc_socket: PathBuf,
     pub wayland_display: String,
@@ -40,6 +41,7 @@ fn find_in(dir: &Path, prefix: &str, suffix: &str) -> Option<PathBuf> {
 }
 
 fn start_sway() -> Option<SwayHeadless> {
+    let serial = super::COMPOSITOR.lock().unwrap_or_else(|e| e.into_inner());
     // The runtime directory is short and private: a unix socket path has a length limit.
     let runtime = tempfile::Builder::new()
         .prefix("sd-sway-")
@@ -78,6 +80,7 @@ fn start_sway() -> Option<SwayHeadless> {
                 if ipc.outputs().is_ok_and(|o| !o.is_empty()) {
                     return Some(SwayHeadless {
                         child,
+                        _serial: serial,
                         wayland_display: wayland
                             .file_name()
                             .and_then(|n| n.to_str())

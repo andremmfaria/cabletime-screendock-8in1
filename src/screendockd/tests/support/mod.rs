@@ -1,8 +1,17 @@
 //! Shared Xvfb and X11 painting helpers for the integration tests.
 #![allow(dead_code)]
 
+#[cfg(feature = "capture-wayland")]
+mod mutter;
 mod sway;
+
+/// Held while a test runs a compositor: sway and a software rendered GNOME Shell are heavy
+/// enough that several at once make each other's IPC time out.
+pub(crate) static COMPOSITOR: Mutex<()> = Mutex::new(());
 mod xorg;
+#[cfg(feature = "capture-wayland")]
+#[allow(unused_imports)]
+pub use mutter::{require_mutter, MutterHeadless};
 #[allow(unused_imports)]
 pub use sway::{require_sway, SwayHeadless};
 #[allow(unused_imports)]
@@ -10,6 +19,7 @@ pub use xorg::{require_xorg, xrandr, XorgDummy};
 
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ConnectionExt, CreateGCAux, Gcontext, Rectangle, Screen, Window};

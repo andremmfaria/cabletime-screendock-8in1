@@ -171,6 +171,24 @@ pub fn place_monitor(
     Ok(Rect::new(x, y, width, height))
 }
 
+/// [`place_monitor`] for a given mechanism. Mutter and the portal place their own monitors, so
+/// the configured placement and anchor do not apply and the rectangle starts at the origin.
+pub fn place_for_backend(
+    facts: &DisplayFacts,
+    settings: &LiveSettings,
+    backend: ExtendBackend,
+) -> Result<Rect, DisplayPolicyError> {
+    match backend {
+        ExtendBackend::Mutter | ExtendBackend::Portal => Ok(Rect::new(
+            0,
+            0,
+            settings.geometry.width().0,
+            settings.geometry.height().0,
+        )),
+        ExtendBackend::X11Randr(_) | ExtendBackend::Wlroots => place_monitor(facts, settings),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +485,25 @@ mod tests {
             place_monitor(&x11_facts(), &live).unwrap(),
             Rect::new(1920, 0, 900, 1200)
         );
+    }
+
+    #[test]
+    fn mutter_and_portal_monitors_need_no_anchor_output() {
+        let facts = DisplayFacts::default();
+        let settings = settings(Placement::RightOf, "primary");
+        assert!(place_monitor(&facts, &settings).is_err());
+        for backend in [ExtendBackend::Mutter, ExtendBackend::Portal] {
+            let rect = place_for_backend(&facts, &settings, backend).unwrap();
+            assert_eq!(
+                (rect.x, rect.y, rect.width, rect.height),
+                (
+                    0,
+                    0,
+                    settings.geometry.width().0,
+                    settings.geometry.height().0
+                )
+            );
+        }
+        assert!(place_for_backend(&facts, &settings, ExtendBackend::Wlroots).is_err());
     }
 }

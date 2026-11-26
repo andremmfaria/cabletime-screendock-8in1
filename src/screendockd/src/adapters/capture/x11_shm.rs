@@ -220,8 +220,12 @@ impl X11ShmCapture {
             .map_err(conn_err)?
             .reply()
             .map_err(conn_err)?;
-        let CaptureArea::Region(rect) = target.area else {
-            return Ok((0, 0, root.width, root.height));
+        let rect = match target.area {
+            CaptureArea::Whole => return Ok((0, 0, root.width, root.height)),
+            CaptureArea::Region(rect) => rect,
+            CaptureArea::Stream { .. } => {
+                return Err(CaptureError::Unsupported("capturing a PipeWire node"))
+            }
         };
         let invalid = || {
             CaptureError::InvalidTarget(format!(

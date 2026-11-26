@@ -11,7 +11,7 @@ pub mod wayland_portal;
 pub mod x11_shm;
 
 pub use self::types::{BackendKind, SessionType};
-use crate::ports::capture::{CaptureBackend, CaptureError};
+use crate::ports::capture::{CaptureArea, CaptureBackend, CaptureError};
 use crate::utils::config::{CaptureBackendChoice, Config};
 
 /// Classifies the session from environment values read through `get`. `$XDG_SESSION_TYPE` wins
@@ -56,10 +56,21 @@ pub fn select_backend(
     }
 }
 
-/// Selects and constructs the capture backend once at startup.
+/// Selects and constructs the capture backend once at startup, pointed at the whole desktop.
 pub fn create_backend(
     config: &Config,
     choice: CaptureBackendChoice,
+) -> Result<Box<dyn CaptureBackend>, CaptureError> {
+    create_backend_at(config, choice, CaptureArea::Whole)
+}
+
+/// Like [`create_backend`], for a capture that starts on `area`. A Wayland capture that
+/// starts on a PipeWire node attaches to it directly and never opens a portal session; every
+/// other combination starts on the whole desktop and leaves the move to `retarget`.
+pub fn create_backend_at(
+    config: &Config,
+    choice: CaptureBackendChoice,
+    area: CaptureArea,
 ) -> Result<Box<dyn CaptureBackend>, CaptureError> {
     let kind = select_backend(choice, detect_session())?;
     tracing::info!(?kind, ?choice, "selected capture backend");
@@ -68,11 +79,24 @@ pub fn create_backend(
             config.capture.x11_display.as_deref(),
             config.capture.fps,
         )?)),
-        BackendKind::WaylandPortal => Ok(Box::new(wayland_portal::WaylandPortalCapture::connect(
-            config.display.width,
-            config.display.height,
-            config.capture.fps,
-        )?)),
+        BackendKind::WaylandPortal => Ok(Box::new(match area {
+            CaptureArea::Stream {
+                node,
+                width,
+                height,
+            } => wayland_portal::WaylandPortalCapture::connect_stream(
+                None,
+                node,
+                width,
+                height,
+                config.capture.fps,
+            )?,
+            _ => wayland_portal::WaylandPortalCapture::connect(
+                config.display.width,
+                config.display.height,
+                config.capture.fps,
+            )?,
+        })),
     }
 }
 

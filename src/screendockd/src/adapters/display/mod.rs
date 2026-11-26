@@ -5,6 +5,7 @@
 
 mod facts;
 mod mirror;
+mod mutter;
 mod portal;
 mod randr;
 mod recovery;
@@ -15,6 +16,12 @@ mod x11_randr;
 
 pub use self::facts::{session_facts, x11_facts};
 pub use self::mirror::{MirrorDisplay, MirrorMonitor};
+#[cfg(feature = "capture-wayland")]
+pub use self::mutter::ZbusMutterConnector;
+pub use self::mutter::{
+    probe_screencast, MutterCalls, MutterConnector, MutterMonitor, MutterVirtualDisplay,
+    DEFAULT_MUTTER_TIMEOUT,
+};
 pub use self::portal::probe_source_types;
 pub use self::recovery::recover;
 pub use self::sway_ipc::sway_output_facts;

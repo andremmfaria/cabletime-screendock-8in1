@@ -253,6 +253,34 @@ WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c /dev
 
 Not verified: a prompt free `xdg-desktop-portal-wlr` screencast of a headless output, frames read from the output by the daemon, and sway on real hardware. Status: requires validation.
 
+## Headless GNOME Shell
+
+Validated on the development host (Ubuntu 26.04, GNOME Shell 50.1 with Mutter 50.1, PipeWire and WirePlumber from the distribution, no GPU access) with every process started as the ordinary user on a private runtime directory and a private session bus:
+
+```text
+dbus-daemon --session --nofork --nopidfile --address=unix:path=$XDG_RUNTIME_DIR/bus
+pipewire
+wireplumber
+gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720
+```
+
+The environment has `XDG_SESSION_TYPE=wayland` and `XDG_CURRENT_DESKTOP=GNOME`, and no `DISPLAY` or `WAYLAND_DISPLAY`. The shell logs `Created surfaceless renderer without GPU`, so buffers are shared memory.
+
+| Check | Result |
+|---|---|
+| `org.gnome.Mutter.ScreenCast` | version 4 on the bus once the shell is up |
+| `CreateSession`, `RecordVirtual`, `Start` | succeed; `PipeWireStreamAdded` carries the node id; the node is `Stream/Output/Video` |
+| frames read by `MutterVirtualDisplay` and `WaylandPortalCapture::connect_stream` | `Bgrx8888`, 1280x720 when 1280x720 is asked for, 1600x900 when 1600x900 is asked for; the first pixel is the shell background, not black |
+| the same size and first pixel read by `gst-launch-1.0 pipewiresrc` on a second monitor | the raw frame is 1280 x 720 x 4 bytes and starts with the same pixel |
+| retargeting a running capture from one stream to another (1280x720 to 800x600) | the next frames have the new size |
+| dropping the monitor | the node disappears from `pw-dump` |
+| `org.gnome.Mutter.DisplayConfig` | one monitor with one mode, so the size of that monitor cannot change at run time |
+| portal `ScreenCast` | `AvailableSourceTypes` is 0 and the backend does not export `org.freedesktop.impl.portal.ScreenCast`, so the portal virtual source is not usable |
+
+Frames are produced when the shell repaints. A node delivers a frame to its first consumer at once; a second consumer of the same node, or a new size negotiated on a node that was already read, gets a frame only after the next repaint, which does not happen while nothing changes. A Wayland client sees only the output made with `--virtual-monitor`, not the `RecordVirtual` monitor, so no client can be drawn on it and the frames show the shell background.
+
+Not verified: GNOME on a real GPU session (lock screen, suspend, the Settings display page, buffer negotiation with a GPU), the portal virtual source, and the position Mutter gives the monitor. Status: requires validation.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:

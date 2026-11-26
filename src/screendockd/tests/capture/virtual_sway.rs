@@ -69,9 +69,20 @@ fn headless_output_holds_the_pixels_a_second_client_reads_at_every_size() {
     sway.ipc()
         .run(&format!("output {name} bg #1060d0 solid_color"))
         .unwrap();
-    let Some((width, height, rgba)) = sway.grim(&name) else {
-        return;
-    };
+    // The background is painted on the next frame, so the first read may still be black.
+    let mut shot = None;
+    for _ in 0..30 {
+        let Some(read) = sway.grim(&name) else {
+            return;
+        };
+        let painted = read.2.get(..3) == Some(&[0x10, 0x60, 0xd0][..]);
+        shot = Some(read);
+        if painted {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let (width, height, rgba) = shot.unwrap();
     assert_eq!((width, height), (1280, 720));
     let at = |x: u32, y: u32| {
         let i = ((y * width + x) * 4) as usize;
@@ -81,10 +92,18 @@ fn headless_output_holds_the_pixels_a_second_client_reads_at_every_size() {
     assert_eq!(at(0, 0), (0x10, 0x60, 0xd0));
 
     monitor.resize(&spec(Rect::new(1280, 0, 900, 720))).unwrap();
-    let (width, height, rgba) = sway.grim(&name).unwrap();
-    assert_eq!((width, height), (900, 720));
-    let last = ((height - 1) * width + (width - 1)) as usize * 4;
-    assert_eq!(&rgba[last..last + 3], &[0x10, 0x60, 0xd0]);
+    let mut last_pixel = [0u8; 3];
+    for _ in 0..30 {
+        let (width, height, rgba) = sway.grim(&name).unwrap();
+        assert_eq!((width, height), (900, 720));
+        let last = ((height - 1) * width + (width - 1)) as usize * 4;
+        last_pixel.copy_from_slice(&rgba[last..last + 3]);
+        if last_pixel == [0x10, 0x60, 0xd0] {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(last_pixel, [0x10, 0x60, 0xd0]);
 }
 
 #[test]

@@ -10,11 +10,11 @@ The capture layer turns the desktop into a stream of `Frame` values for the enco
 | `PixelFormat` | Four-byte layouts named by memory byte order: `Bgrx8888`, `Bgra8888`, `Rgbx8888`, `Rgba8888` |
 | `CaptureError` | `thiserror` enum: `NoSession`, `BackendUnavailable`, `Connection`, `Shm`, `Portal`, `Stream`, `InvalidFrame`, `Png`, `Unsupported`, `InvalidTarget`, `Io` |
 | `CaptureBackend` | Object-safe, `Send` trait with `name()` and `next_frame() -> Result<Frame, CaptureError>`. `next_frame` blocks until a frame is due. `retarget(CaptureTarget)` points a running backend at another area and frame rate; the default refuses with `Unsupported` |
-| `CaptureTarget` | A `CaptureArea` (`Whole` or `Region(Rect)` in source coordinates) and a frame rate, where zero disables pacing |
+| `CaptureTarget` | A `CaptureArea` and a frame rate, where zero disables pacing. The areas are `Whole`, `Region(Rect)` in source coordinates, and `Stream { node, width, height }`, a PipeWire node asked for that size. The X11 backend refuses `Stream`; the Wayland backend refuses `Region` |
 
 ## Backend selection
 
-The backend is chosen once at startup by `create_backend(&config, choice)`, which returns `Box<dyn CaptureBackend>`.
+The backend is chosen once at startup by `create_backend(&config, choice)`, which returns `Box<dyn CaptureBackend>`. `create_backend_at(&config, choice, area)` does the same for a capture that starts on an area: a Wayland capture that starts on a `Stream` area attaches to the node and opens no portal session. The daemon creates its virtual monitor first and then the capture, so a capture that starts on a monitor's stream opens no portal session.
 
 1. The choice comes from `capture.backend` in the config (`auto`, `x11` or `wayland`), or from `--backend` on the `capture` subcommand, which overrides the config.
 2. `x11` and `wayland` select that backend regardless of the session.
@@ -43,8 +43,10 @@ With the feature enabled:
 - The thread then connects a PipeWire stream to the node the portal returned, requesting `BGRx`, `BGRA`, `RGBx` or `RGBA` at a size range with `display.width` by `display.height` as the preferred size.
 - The process callback copies each buffer into a `Frame` and pushes it into a queue of two frames. When the consumer lags, new frames are dropped. Frames are rate limited to `capture.fps`.
 - `next_frame` receives from the queue and returns `CaptureError::Stream` once the stream has ended.
+- `connect_stream(remote, node, width, height, fps)` skips the portal: it connects to the PipeWire socket named by `remote` (the default socket of the environment when `None`) and attaches to `node`, asking for `width` by `height`. Buffers that carry no pixels are skipped.
+- `retarget` switches the running capture between sources. A `Stream` area attaches to that node (the same node with another size counts as another source), `Whole` opens the portal session, and `Region` is refused with `Unsupported`. The new consumer starts before the old one stops, so a failed attach leaves the capture where it was. A change of the frame rate alone only changes the pacing.
 
-Status: the portal half type-checks against ashpd 0.14. The PipeWire half is compiled by CI with the PipeWire development packages installed; it has not been run, because running it needs a Wayland compositor with a portal and PipeWire. Requires on-session validation (Stage 2 in [testing.md](testing.md)).
+Status: attaching to a node is verified against the Mutter stream of a headless GNOME Shell: frames arrive as `Bgrx8888` at the requested size, and retargeting from one stream to another switches the frames (see [hardware-validation.md](hardware-validation.md)). The portal half type-checks against ashpd 0.14. The PipeWire half is compiled by CI with the PipeWire development packages installed; it has not been run, because running it needs a Wayland compositor with a portal and PipeWire. Requires on-session validation (Stage 2 in [testing.md](testing.md)).
 
 ## Command line
 

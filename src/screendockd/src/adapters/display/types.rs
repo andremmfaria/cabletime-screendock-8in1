@@ -249,3 +249,77 @@ pub(super) const IPC_MAX_PAYLOAD: usize = 1 << 20;
 pub(super) const IPC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long a changed output gets to show the new geometry.
 pub(super) const OUTPUT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// The calls the Mutter display makes on `org.gnome.Mutter.ScreenCast`, so the order of the
+/// calls can be tested against a recording double as well as a real shell.
+pub trait MutterCalls: Send {
+    /// `CreateSession`; returns the object path of the session.
+    fn create_session(&mut self) -> Result<String, VdisplayError>;
+
+    /// `RecordVirtual` on the session; returns the object path of the stream.
+    fn record_virtual(&mut self, session: &str) -> Result<String, VdisplayError>;
+
+    /// Listens for `PipeWireStreamAdded` on `stream`, calls `Start` on the session and waits
+    /// up to `timeout` for the signal; returns the PipeWire node id it carries.
+    fn start(
+        &mut self,
+        session: &str,
+        stream: &str,
+        timeout: std::time::Duration,
+    ) -> Result<u32, VdisplayError>;
+
+    /// `Stop` on the session; failures are logged, not returned.
+    fn stop(&mut self, session: &str);
+}
+
+/// Opens a connection to the Mutter ScreenCast service.
+pub trait MutterConnector: Send + Sync {
+    fn connect(&self) -> Result<Box<dyn MutterCalls>, VdisplayError>;
+}
+
+/// Makes virtual monitors through `org.gnome.Mutter.ScreenCast` `RecordVirtual`.
+///
+/// The session belongs to the D-Bus connection: Mutter removes the stream when the connection
+/// closes, so a killed daemon leaves nothing behind.
+#[derive(Clone)]
+pub struct MutterVirtualDisplay {
+    pub(super) connector: std::sync::Arc<dyn MutterConnector>,
+    pub(super) timeout: std::time::Duration,
+}
+
+/// A monitor backed by a Mutter stream. Dropping it stops the session.
+pub struct MutterMonitor {
+    pub(super) calls: Box<dyn MutterCalls>,
+    pub(super) session: String,
+    pub(super) node_id: u32,
+    pub(super) rect: Rect,
+}
+
+/// How long Mutter gets to announce the PipeWire node after `Start`.
+pub const DEFAULT_MUTTER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// The bus name, object path and interfaces of the Mutter ScreenCast service.
+#[cfg(feature = "capture-wayland")]
+pub(super) const MUTTER_SERVICE: &str = "org.gnome.Mutter.ScreenCast";
+#[cfg(feature = "capture-wayland")]
+pub(super) const MUTTER_PATH: &str = "/org/gnome/Mutter/ScreenCast";
+#[cfg(feature = "capture-wayland")]
+pub(super) const MUTTER_SESSION_INTERFACE: &str = "org.gnome.Mutter.ScreenCast.Session";
+/// `cursor-mode` value of `RecordVirtual` that paints the cursor into the frames.
+#[cfg(feature = "capture-wayland")]
+pub(super) const CURSOR_EMBEDDED: u32 = 1;
+#[cfg(feature = "capture-wayland")]
+pub(super) const MUTTER_STREAM_INTERFACE: &str = "org.gnome.Mutter.ScreenCast.Stream";
+
+/// Connects to the session bus that `address` names, or to `$DBUS_SESSION_BUS_ADDRESS`.
+#[cfg(feature = "capture-wayland")]
+#[derive(Debug, Clone, Default)]
+pub struct ZbusMutterConnector {
+    pub(super) address: Option<String>,
+}
+
+/// The Mutter ScreenCast calls over zbus, driven on a private single threaded runtime.
+#[cfg(feature = "capture-wayland")]
+pub(super) struct ZbusMutterCalls {
+    pub(super) runtime: tokio::runtime::Runtime,
+    pub(super) connection: zbus::Connection,
+}

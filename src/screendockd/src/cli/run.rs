@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use signal_hook::consts::SIGHUP;
 use signal_hook::iterator::Signals;
 
-use crate::adapters::capture::create_backend;
+use crate::adapters::capture::{create_backend, create_backend_at};
 use crate::adapters::control::{socket_path, ControlServer};
 use crate::adapters::display::SystemDisplayProvider;
 use crate::adapters::encode::create_encoder;
@@ -48,12 +48,26 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
     let mi00_handle = HidrawHandle::open_mi00(&mi00).context("failed to open MI_00")?;
     let mi01_handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
     let choice = args.backend.map_or(config.capture.backend, Into::into);
-    let mut capture = create_backend(config, choice).context("failed to start capture")?;
     let mut monitors = MonitorManager::new(
         Box::new(SystemDisplayProvider::new()),
         config.virtual_display.clone(),
     );
     let mut area = monitors.start(&live).map_err(|e| anyhow::anyhow!(e))?;
+    // The monitor comes first: a Wayland capture of a monitor's stream attaches to the node
+    // and never opens a portal session.
+    let mut capture = match create_backend_at(config, choice, area) {
+        Ok(capture) => capture,
+        Err(e)
+            if matches!(area, CaptureArea::Stream { .. })
+                && config.virtual_display.fallback == FallbackPolicy::Mirror =>
+        {
+            tracing::warn!(error = %e, "cannot attach to the monitor's stream; mirroring the desktop instead");
+            monitors.release();
+            area = CaptureArea::Whole;
+            create_backend(config, choice).context("failed to start capture")?
+        }
+        Err(e) => return Err(e).context("failed to start capture"),
+    };
     if area != CaptureArea::Whole {
         let target = CaptureTarget {
             area,

@@ -122,6 +122,12 @@ Status: requires validation.
 
 The portal virtual display is unit tested against a mocked portal source: restore token reuse and replacement, the start timeout, closing a late stream, closing the session on drop and the resize rules. These tests run in every build.
 
+## Capture: headless GNOME Shell
+
+The Mutter tests (`tests/capture/virtual_mutter.rs`, helper `tests/support/mutter.rs`, built with `--features capture-wayland`) start `dbus-daemon --session`, `pipewire`, `wireplumber` and `gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x720` on a private runtime directory under `/tmp`, in one process group that is signalled when the test ends. They cover the frames of a `RecordVirtual` stream through `WaylandPortalCapture::connect_stream` (size, `Bgrx8888`, not black, and the same size and first pixel read with `gst-launch-1.0 pipewiresrc` on a second monitor), the size a capture asks for, retargeting a running capture from one stream to another, and the node disappearing when the monitor drops. The call order of the Mutter display is unit tested against a recording double (`mutter_mock_*` in `adapters::display::mutter`).
+
+The tests skip with a message when gnome-shell, pipewire, wireplumber or dbus-daemon is missing or the shell cannot start; `SCREENDOCK_REQUIRE_MUTTER=1` turns that into a failure. The GStreamer reference needs `gst-launch-1.0` with the PipeWire plugin and the node check needs `pw-dump`; each is skipped when missing.
+
 ## Capture: headless sway
 
 The sway tests (`tests/capture/virtual_sway.rs`, helper `tests/support/sway.rs`) start sway with `WLR_BACKENDS=headless`, `WLR_LIBINPUT_NO_DEVICES=1` and `WLR_RENDERER=pixman` on a private runtime directory under `/tmp`, and stop it when the test ends. They cover output creation at the placed rectangle, resizing, several monitors, pixels read back with `grim`, display facts and policy choice, and switching the display mode through the monitor manager. The IPC client has unit tests against a fake socket.

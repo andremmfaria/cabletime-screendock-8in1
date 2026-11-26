@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 
 use crate::adapters::display::{recover, RecoveryOutcome, SystemDisplayProvider};
-use crate::core::display_policy::{decide, place_monitor};
+use crate::core::display_policy::{decide, place_for_backend, place_monitor};
 use crate::core::reconfig::LiveSettings;
 use crate::core::types::DisplayDecision;
 use crate::ports::display::DisplayProvider;
@@ -51,13 +51,17 @@ fn probe(config: &Config) -> Result<()> {
         mode: DisplayMode::Extend,
         ..config.virtual_display.clone()
     };
+    let live = LiveSettings::try_from(config).context("invalid settings")?;
+    let mut placed = place_monitor(&facts, &live);
     match decide(&facts, &extend) {
-        Ok(DisplayDecision::Extend(backend)) => println!("extend: {backend:?}"),
+        Ok(DisplayDecision::Extend(backend)) => {
+            println!("extend: {backend:?}");
+            placed = place_for_backend(&facts, &live, backend);
+        }
         Ok(DisplayDecision::Mirror { reason }) => println!("extend: unavailable ({reason})"),
         Err(e) => println!("extend: unavailable ({e})"),
     }
-    let live = LiveSettings::try_from(config).context("invalid settings")?;
-    match place_monitor(&facts, &live) {
+    match placed {
         Ok(rect) => println!(
             "monitor: {}x{}+{}+{}",
             rect.width, rect.height, rect.x, rect.y

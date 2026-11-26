@@ -41,9 +41,23 @@ Creating a monitor first grows the X screen so it holds the monitor rectangle, t
 - The provider reads the portal's source types once per facts query, within 3 seconds, and treats a missing portal as unknown.
 - The portal display needs the `capture-wayland` feature. Without it a request for the portal backend is refused with the reason.
 
-The daemon's capture backend on Wayland opens its own portal session for the whole desktop and cannot follow a monitor rectangle. When it refuses to retarget and the `fallback` setting is `mirror`, the daemon logs the reason, removes the monitor and mirrors; with `fail` it ends.
+The Wayland capture backend attaches to the monitor's PipeWire node through the capture area `Stream` (see [capture.md](capture.md)). For a portal monitor the node is opened on the default PipeWire connection, not on the remote the portal hands out. When the capture refuses to retarget and the `fallback` setting is `mirror`, the daemon logs the reason, removes the monitor and mirrors; with `fail` it ends.
 
-Status: the portal display is tested against a mocked portal (token handling, timeout, session close, resize). A live portal virtual source requires validation: headless GNOME does not offer one.
+Status: the portal display is tested against a mocked portal (token handling, timeout, session close, resize). A live portal virtual source requires validation: headless GNOME does not offer one, so attaching the capture to a portal node is also unverified.
+
+## Mutter display
+
+`MutterVirtualDisplay` makes the monitor through `org.gnome.Mutter.ScreenCast` on the session bus, without the portal. `create` makes one session and runs `CreateSession`, `RecordVirtual` (cursor embedded), a subscription to `PipeWireStreamAdded` on the stream, `Start`, and waits up to 10 seconds for the signal, which carries the PipeWire node id. A failure after the session exists calls `Stop` on it.
+
+- Mutter, not the daemon, decides where the monitor sits, so `placement` and `anchor` do not apply: the monitor rectangle starts at the origin with the configured size.
+- The monitor exists for its stream. `VirtualMonitor::pipewire_node` returns the node, the capture area of the monitor is `Stream` with that node and the monitor size, and dropping the monitor calls `Stop`. The session belongs to the D-Bus connection, which the monitor owns, so Mutter also removes it when the daemon dies.
+- The size of the frames is the size the consumer asks the node for. `resize` therefore only changes the rectangle the capture is pointed at, and the capture asks for the new size.
+- The calls run through the `MutterCalls` trait. The zbus implementation drives them on a private single threaded runtime, and tests replace it with a recording double.
+- The Mutter display needs the `capture-wayland` feature, which brings in `zbus`.
+
+Measured on headless GNOME Shell 50.1 (see [hardware-validation.md](hardware-validation.md)): the stream is `BGRx`, the frames come at the requested size (1280x720, 1600x900 and 800x600 were asked for and delivered), the first consumer of a new node gets a frame at once, and later frames come when the shell repaints the monitor. A desktop that is not repainted produces no further frames, and a new consumer or a new size on a node that was already read gets a frame only after the next repaint.
+
+Status: validated on headless GNOME Shell with a software renderer. A headless shell has no client on the virtual monitor (a Wayland client sees only the output made with `--virtual-monitor`), so the frames show the shell's background. GNOME on a real GPU session requires validation, using the checklist in [hardware-validation.md](hardware-validation.md).
 
 ## Sway headless output
 
@@ -56,7 +70,7 @@ Status: the portal display is tested against a mocked portal (token handling, ti
 - A headless output belongs to the compositor, not to the IPC connection. A daemon that is killed with SIGKILL leaves its output in place until it is unplugged (`swaymsg output HEADLESS-<n> unplug`) or sway exits; the next start creates another one.
 - The IPC client reads replies of at most 1 MiB, checks the magic and message type, and parses JSON into typed fields.
 
-Capturing the output's frames through `xdg-desktop-portal-wlr` without a prompt (the portal's `chooser_type=none` with an `output_name`) has not been tried. Status: requires validation. The daemon's Wayland capture backend does not follow a monitor rectangle yet, so extend mode on sway creates the output and then mirrors under the `mirror` fallback; a runtime switch to extend is rejected with the capture backend's reason.
+Capturing the output's frames through `xdg-desktop-portal-wlr` without a prompt (the portal's `chooser_type=none` with an `output_name`) has not been tried. Status: requires validation. A sway output is a rectangle of the desktop, and the Wayland capture backend captures a whole desktop or a PipeWire node, not a rectangle, so extend mode on sway creates the output and then mirrors under the `mirror` fallback; a runtime switch to extend is rejected with the capture backend's reason.
 
 ## Placement
 

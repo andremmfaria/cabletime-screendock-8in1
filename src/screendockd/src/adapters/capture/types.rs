@@ -2,7 +2,11 @@
 //! X11 backend.
 
 #[cfg(feature = "capture-wayland")]
+use std::sync::atomic::{AtomicBool, AtomicU64};
+#[cfg(feature = "capture-wayland")]
 use std::sync::mpsc::{Receiver, SyncSender};
+#[cfg(feature = "capture-wayland")]
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use memmap2::MmapMut;
@@ -58,6 +62,9 @@ pub struct WaylandPortalCapture;
 /// Frames buffered between the PipeWire thread and the consumer.
 #[cfg(feature = "capture-wayland")]
 pub(super) const QUEUE_DEPTH: usize = 2;
+/// How often a PipeWire consumer checks whether it was asked to stop.
+#[cfg(feature = "capture-wayland")]
+pub(super) const STOP_POLL: Duration = Duration::from_millis(100);
 /// Upper bound advertised for the negotiated stream size.
 #[cfg(feature = "capture-wayland")]
 pub(super) const MAX_DIMENSION: u32 = 8192;
@@ -65,10 +72,34 @@ pub(super) const MAX_DIMENSION: u32 = 8192;
 #[cfg(feature = "capture-wayland")]
 pub(super) type FrameMessage = Result<Frame, CaptureError>;
 
-/// Receives frames from a portal ScreenCast session through PipeWire.
+/// Where a Wayland capture gets its frames.
+#[cfg(feature = "capture-wayland")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Attachment {
+    /// A portal ScreenCast session of the whole desktop.
+    Portal,
+    /// A PipeWire node asked for a size, with no portal involved.
+    Stream { node: u32, width: u32, height: u32 },
+}
+
+/// A running PipeWire consumer thread and the means to steer and stop it.
+#[cfg(feature = "capture-wayland")]
+pub(super) struct Worker {
+    pub(super) frames: Receiver<FrameMessage>,
+    pub(super) stop: Arc<AtomicBool>,
+    pub(super) attachment: Attachment,
+}
+
+/// Receives frames from a portal ScreenCast session or from a PipeWire node through PipeWire.
 #[cfg(feature = "capture-wayland")]
 pub struct WaylandPortalCapture {
-    pub(super) frames: Receiver<FrameMessage>,
+    pub(super) worker: Worker,
+    /// Minimum time between delivered frames in microseconds; zero disables pacing.
+    pub(super) interval_us: Arc<AtomicU64>,
+    /// The PipeWire remote to connect nodes on; `None` uses the default one.
+    pub(super) remote: Option<String>,
+    /// The size asked for when a portal session is opened.
+    pub(super) portal_size: (u32, u32),
 }
 
 #[cfg(feature = "capture-wayland")]
@@ -76,6 +107,6 @@ pub(super) struct StreamState {
     pub(super) format: spa::param::video::VideoInfoRaw,
     pub(super) tx: SyncSender<FrameMessage>,
     pub(super) mainloop: pw::main_loop::MainLoopRc,
-    pub(super) interval: Duration,
+    pub(super) interval_us: Arc<AtomicU64>,
     pub(super) last_sent: Option<Instant>,
 }

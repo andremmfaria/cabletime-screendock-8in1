@@ -104,6 +104,9 @@ pub enum CaptureArea {
     Whole,
     /// A rectangle of the source in its own coordinates.
     Region(Rect),
+    /// A PipeWire video node of a Wayland compositor, produced at `width` by `height`. The
+    /// consumer asks the node for that size, so the frames carry it.
+    Stream { node: u32, width: u32, height: u32 },
 }
 
 /// Where a capture backend looks and how fast it produces frames.

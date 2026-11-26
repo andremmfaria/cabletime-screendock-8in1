@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 
 pub use super::types::{MonitorManager, MonitorPipeline};
 use crate::app::supervisor::PipelineHandle;
-use crate::core::display_policy::{decide, place_monitor};
+use crate::core::display_policy::{decide, place_for_backend, place_monitor};
 use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::types::DisplayDecision;
 use crate::ports::capture::CaptureArea;
-use crate::ports::display::{DisplayProvider, MonitorName, MonitorSpec};
+use crate::ports::display::{DisplayProvider, MonitorName, MonitorSpec, Rect};
 use crate::utils::types::{DisplayMode, FallbackPolicy, VirtualDisplayConfig};
 use tracing::warn;
 
@@ -30,11 +30,22 @@ impl MonitorManager {
         self.monitor = None;
     }
 
-    /// The area to capture now: the monitor rectangle, or the whole desktop.
+    /// The area to capture now: the monitor's stream when it has one, else its rectangle,
+    /// or the whole desktop.
     pub fn area(&self) -> CaptureArea {
         self.monitor
             .as_ref()
-            .map_or(CaptureArea::Whole, |m| CaptureArea::Region(m.rect()))
+            .map_or(CaptureArea::Whole, |m| match m.pipewire_node() {
+                Some(node) => {
+                    let rect = m.rect();
+                    CaptureArea::Stream {
+                        node,
+                        width: rect.width,
+                        height: rect.height,
+                    }
+                }
+                None => CaptureArea::Region(m.rect()),
+            })
     }
 
     fn config_for(&self, settings: &LiveSettings) -> VirtualDisplayConfig {
@@ -51,23 +62,29 @@ impl MonitorManager {
         }
     }
 
-    fn spec_for(&self, settings: &LiveSettings) -> Result<MonitorSpec, String> {
-        let facts = self.provider.facts().map_err(|e| e.to_string())?;
-        let rect = place_monitor(&facts, settings).map_err(|e| e.to_string())?;
-        Ok(MonitorSpec::new(MonitorName::new(&settings.name), rect))
-    }
-
-    /// Checks that a monitor could be made for `settings`, without making one.
-    pub fn check(&self, settings: &LiveSettings) -> Result<(), String> {
+    /// Where the monitor goes for `settings`: next to the anchor, or at the origin for the
+    /// mechanisms that place their own monitors.
+    fn rect_for(&self, settings: &LiveSettings) -> Result<Rect, String> {
         let facts = self.provider.facts().map_err(|e| e.to_string())?;
         let config = VirtualDisplayConfig {
             fallback: FallbackPolicy::Fail,
             ..self.config_for(settings)
         };
-        decide(&facts, &config).map_err(|e| e.to_string())?;
-        place_monitor(&facts, settings)
-            .map(drop)
-            .map_err(|e| e.to_string())
+        let rect = match decide(&facts, &config).map_err(|e| e.to_string())? {
+            DisplayDecision::Extend(backend) => place_for_backend(&facts, settings, backend),
+            DisplayDecision::Mirror { .. } => place_monitor(&facts, settings),
+        };
+        rect.map_err(|e| e.to_string())
+    }
+
+    fn spec_for(&self, settings: &LiveSettings) -> Result<MonitorSpec, String> {
+        let rect = self.rect_for(settings)?;
+        Ok(MonitorSpec::new(MonitorName::new(&settings.name), rect))
+    }
+
+    /// Checks that a monitor could be made for `settings`, without making one.
+    pub fn check(&self, settings: &LiveSettings) -> Result<(), String> {
+        self.rect_for(settings).map(drop)
     }
 
     fn create(&mut self, settings: &LiveSettings) -> Result<(), String> {
@@ -81,7 +98,7 @@ impl MonitorManager {
         else {
             return Err("the mode is mirror".into());
         };
-        let rect = place_monitor(&facts, settings).map_err(|e| e.to_string())?;
+        let rect = place_for_backend(&facts, settings, backend).map_err(|e| e.to_string())?;
         let spec = MonitorSpec::new(MonitorName::new(&settings.name), rect);
         let display = self
             .provider
@@ -400,5 +417,71 @@ mod tests {
         ));
         assert_eq!(monitors.reconcile(&shipped()), Ok(CaptureArea::Whole));
         assert_eq!(log.lock().unwrap().len(), 2, "one create, one drop");
+    }
+
+    struct StreamMonitor(Rect);
+
+    impl VirtualMonitor for StreamMonitor {
+        fn rect(&self) -> Rect {
+            self.0
+        }
+        fn resize(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError> {
+            self.0 = spec.rect;
+            Ok(())
+        }
+        fn pipewire_node(&self) -> Option<u32> {
+            Some(45)
+        }
+    }
+
+    struct StreamDisplay;
+
+    impl VirtualDisplay for StreamDisplay {
+        fn name(&self) -> &'static str {
+            "stream"
+        }
+        fn create(&self, spec: &MonitorSpec) -> Result<Box<dyn VirtualMonitor>, VdisplayError> {
+            Ok(Box::new(StreamMonitor(spec.rect)))
+        }
+    }
+
+    /// A GNOME session: no output list, Mutter's ScreenCast on the bus.
+    struct GnomeProvider;
+
+    impl DisplayProvider for GnomeProvider {
+        fn facts(&self) -> Result<DisplayFacts, VdisplayError> {
+            Ok(DisplayFacts {
+                server: DisplayServer::Wayland,
+                desktop: "GNOME".into(),
+                mutter_screencast: true,
+                ..DisplayFacts::default()
+            })
+        }
+        fn virtual_display(
+            &self,
+            backend: ExtendBackend,
+        ) -> Result<Box<dyn VirtualDisplay>, VdisplayError> {
+            assert_eq!(backend, ExtendBackend::Mutter);
+            Ok(Box::new(StreamDisplay))
+        }
+        fn mirror(&self, _: &str) -> Result<Box<dyn VirtualDisplay>, VdisplayError> {
+            unreachable!("monitor management never mirrors an output")
+        }
+    }
+
+    #[test]
+    fn stream_backed_monitor_is_captured_by_node_without_an_anchor_output() {
+        let mut monitors =
+            MonitorManager::new(Box::new(GnomeProvider), VirtualDisplayConfig::default());
+        let (extend, _) = switch(&shipped(), DisplayMode::Extend);
+        assert_eq!(
+            monitors.reconcile(&extend),
+            Ok(CaptureArea::Stream {
+                node: 45,
+                width: 1280,
+                height: 720
+            })
+        );
+        assert_eq!(monitors.reconcile(&shipped()), Ok(CaptureArea::Whole));
     }
 }
