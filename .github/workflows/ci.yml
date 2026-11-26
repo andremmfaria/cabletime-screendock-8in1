@@ -41,12 +41,7 @@ jobs:
       - name: Check formatting (cargo fmt)
         run: cargo fmt --check
 
-      # NOTE: as of Milestone 1, `cargo clippy -- -D warnings` passes clean on this crate
-      # (verified locally: `cargo clippy -- -D warnings` produced zero warnings against commit
-      # 50c0e8a). Kept warnings-as-errors rather than relaxed, since there is nothing here to
-      # relax for; if a future milestone introduces a clippy warning in existing code that this
-      # workflow then blocks on, that's a signal to fix the warning, not to silently loosen this
-      # check without discussion.
+      # Warnings are errors: fix a new clippy warning rather than loosening this check.
       - name: Lint (cargo clippy)
         run: cargo clippy --all-targets -- -D warnings
 
