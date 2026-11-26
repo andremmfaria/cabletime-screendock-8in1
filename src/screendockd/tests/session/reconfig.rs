@@ -587,11 +587,12 @@ fn size_change_rebuilds_the_encoder_and_runs_the_dock_cycle_with_video_at_the_ne
         .host_methods()
         .contains(&"notify-projection-stopped".to_string()));
     let built = built.lock().unwrap();
-    assert_eq!(built.len(), 2);
-    assert_eq!(built[1].geometry.size(), PictureSize::new(1600, 900));
+    // The initial encoder, the one prepared and probed aside, and the one the loop runs.
+    assert_eq!(built.len(), 3);
+    assert_eq!(built[2].geometry.size(), PictureSize::new(1600, 900));
     // The rebuilt encoder starts with a keyframe that carries the parameter sets.
     let emitted = emitted.lock().unwrap();
-    let first_new = emitted.iter().find(|(number, ..)| *number == 1).unwrap();
+    let first_new = emitted.iter().find(|(number, ..)| *number == 2).unwrap();
     assert_eq!((first_new.1, first_new.2), (true, 7));
     let beats = dock.heartbeat_times();
     let widest = beats.windows(2).map(|w| w[1] - w[0]).max().unwrap();
@@ -622,7 +623,7 @@ fn fps_and_preset_changes_rebuild_the_encoder_without_a_dock_cycle() {
     assert_eq!(report.handshakes, 1, "no dock cycle");
     assert_eq!(dock.launch_sizes(), [(1280, 720)]);
     assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
-    assert_eq!(built.lock().unwrap().len(), 3);
+    assert_eq!(built.lock().unwrap().len(), 5);
     assert_eq!(
         targets.lock().unwrap().as_slice(),
         [CaptureTarget {
@@ -631,7 +632,7 @@ fn fps_and_preset_changes_rebuild_the_encoder_without_a_dock_cycle() {
         }]
     );
     let emitted = emitted.lock().unwrap();
-    for number in [1, 2] {
+    for number in [2, 4] {
         let first = emitted.iter().find(|(n, ..)| *n == number).unwrap();
         assert_eq!((first.1, first.2), (true, 7), "encoder {number}");
     }
@@ -682,4 +683,161 @@ fn a_size_the_dock_refuses_leaves_the_old_encoder_and_size_running() {
     });
     let (_, dock) = rig.finish();
     assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
+}
+
+fn status_field(supervisor: &mut Supervisor, key: &str) -> String {
+    let (reply, answer) = mpsc::channel();
+    supervisor.handle(Command::Request {
+        request: ControlRequest::Status {},
+        reply,
+    });
+    match answer.recv().unwrap() {
+        ControlResponse::Status { fields } => fields[key].clone(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn portrait_size_is_accepted_as_a_dock_cycle_with_swapped_headers() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+
+    let class = applied_class(ask(&mut rig.supervisor, "resolution", "720x1280"));
+    assert_eq!(class, "dock cycle");
+    assert_eq!(
+        rig.supervisor.settings().geometry.orientation(),
+        Orientation::Portrait
+    );
+    wait_for("portrait video", || {
+        rig.dock.video_stats().sizes == [(1280, 720), (720, 1280)]
+    });
+    let (_, dock) = rig.finish();
+    assert_eq!(dock.launch_sizes(), [(1280, 720), (720, 1280)]);
+}
+
+#[test]
+fn a_dock_that_loses_the_session_after_the_cycle_is_rolled_back_to_the_last_good_size() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+    rig.dock.drop_session_after_next_launch(3);
+
+    match ask(&mut rig.supervisor, "resolution", "1600x900") {
+        ControlResponse::Rejected {
+            reason,
+            rolled_back,
+        } => {
+            assert!(rolled_back, "{reason}");
+            assert!(reason.contains("lost the session"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(rig.supervisor.settings().geometry, geometry());
+    assert_eq!(status_field(&mut rig.supervisor, "state"), "running");
+
+    wait_for("the old size on the panel again", || {
+        rig.dock.video_stats().sizes == [(1280, 720), (1600, 900), (1280, 720)]
+    });
+    let dock_launches = rig.dock.launch_sizes();
+    assert_eq!(dock_launches.first(), Some(&(1280, 720)));
+    assert_eq!(dock_launches.last(), Some(&(1280, 720)));
+    assert!(dock_launches.contains(&(1600, 900)));
+    let (_, dock) = rig.finish();
+    let beats = dock.heartbeat_times();
+    let widest = beats.windows(2).map(|w| w[1] - w[0]).max().unwrap();
+    assert!(widest < Duration::from_secs(2), "heartbeat gap {widest:?}");
+}
+
+#[test]
+fn a_rollback_that_fails_leaves_the_daemon_degraded_until_the_next_command_recovers_it() {
+    let mut rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+    // Every launch is refused, so the new size and the way back both fail.
+    rig.dock.set_launch_error(true);
+
+    match ask(&mut rig.supervisor, "resolution", "1600x900") {
+        ControlResponse::Rejected {
+            reason,
+            rolled_back,
+        } => {
+            assert!(!rolled_back);
+            assert!(reason.contains("degraded"), "{reason}");
+            assert!(reason.contains("rollback failed"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(rig.supervisor.settings().geometry, geometry());
+    assert_eq!(status_field(&mut rig.supervisor, "state"), "degraded");
+    assert!(status_field(&mut rig.supervisor, "degraded_reason").contains("rollback"));
+
+    // While the dock keeps refusing, the retry fails and the state stays.
+    match ask(&mut rig.supervisor, "bitrate", "3000") {
+        ControlResponse::Rejected { reason, .. } => assert!(reason.contains("retry"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(status_field(&mut rig.supervisor, "state"), "degraded");
+
+    rig.dock.set_launch_error(false);
+    let class = applied_class(ask(&mut rig.supervisor, "bitrate", "3000"));
+    assert_eq!(class, "live");
+    assert_eq!(status_field(&mut rig.supervisor, "state"), "running");
+    assert_eq!(rig.supervisor.settings().bitrate_kbps, 3000);
+
+    let after = rig.dock.video_stats().messages;
+    wait_for("video again", || {
+        rig.dock.video_stats().messages > after + 5
+    });
+    let (_, dock) = rig.finish();
+    assert_eq!(dock.video_stats().sizes, [(1280, 720)]);
+}
+
+#[test]
+fn commands_sent_during_a_cycle_are_queued_and_served_in_order() {
+    let rig = rig(None);
+    wait_for("video", || rig.dock.video_stats().messages > 5);
+    let Rig {
+        dock,
+        supervisor,
+        stop,
+        daemon,
+        ..
+    } = rig;
+    let (commands, inbox) = mpsc::channel();
+    let serving = std::thread::spawn(move || supervisor.run(&inbox));
+    let request = |key: &str, value: &str| {
+        let (reply, answer) = mpsc::channel();
+        commands
+            .send(Command::Request {
+                request: ControlRequest::Set {
+                    key: key.into(),
+                    value: value.into(),
+                },
+                reply,
+            })
+            .unwrap();
+        answer
+    };
+    let first = request("resolution", "1600x900");
+    let second = request("bitrate", "2500");
+    let third = request("resolution", "1280x720");
+
+    assert!(matches!(
+        first.recv().unwrap(),
+        ControlResponse::Applied { class, .. } if class == "dock cycle"
+    ));
+    assert!(matches!(
+        second.recv().unwrap(),
+        ControlResponse::Applied { class, .. } if class == "live"
+    ));
+    assert!(matches!(
+        third.recv().unwrap(),
+        ControlResponse::Applied { class, .. } if class == "dock cycle"
+    ));
+    drop(commands);
+    serving.join().unwrap();
+    wait_for("video back at the first size", || {
+        dock.video_stats().sizes == [(1280, 720), (1600, 900), (1280, 720)]
+    });
+    stop.store(true, Ordering::Relaxed);
+    daemon.join().unwrap().unwrap();
+    assert_eq!(dock.launch_sizes(), [(1280, 720), (1600, 900), (1280, 720)]);
 }

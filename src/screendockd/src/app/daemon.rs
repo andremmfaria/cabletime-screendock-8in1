@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use tracing::{debug, info, info_span, warn};
 
+use super::pipeline::probe_build;
 pub use super::types::{
     DaemonError, DaemonParams, DaemonReport, EncoderBuilder, PipelineKnobs,
     DEFAULT_MAX_CONSECUTIVE_ERRORS,
@@ -29,10 +30,10 @@ use super::types::{
 };
 use crate::core::keyframe::KeyframeClock;
 use crate::core::session::{Session, SessionHandle};
-use crate::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
+use crate::ports::capture::{CaptureBackend, CaptureError};
 use crate::ports::encode::{Encoder, RateSettings};
 use crate::ports::transport::DockTransport;
-use crate::protocol::framing::{MessageBuilder, PictureSize, ReportId};
+use crate::protocol::framing::{MessageBuilder, ReportId};
 
 /// Runs the daemon until `stop` is set, `params.max_frames` frames were sent, or too many frames
 /// in a row failed.
@@ -62,6 +63,7 @@ pub fn run(
     let started = Instant::now();
     let session = Session::start(mi00, params.session.clone())?;
     let handle = session.handle();
+    params.pipeline.attach_session(handle.clone());
     let mut report = DaemonReport::default();
 
     let loop_result = video_loop(
@@ -126,7 +128,7 @@ fn video_loop(
 
     while !stop.load(Ordering::Relaxed) && params.max_frames.is_none_or(|m| report.frames_sent < m)
     {
-        if let Some((version, knobs)) = params.pipeline.pending(seen) {
+        if let Some((version, knobs, cycle)) = params.pipeline.pending(seen) {
             seen = version;
             // The change runs here, on the only thread that writes video, so nothing is
             // written while the encoder is swapped or the dock cycle runs.
@@ -137,7 +139,7 @@ fn video_loop(
                 pipeline: &params.pipeline,
                 cycle_timeout: params.session.cycle_timeout(),
             };
-            let result = apply_knobs(&mut parts, &mut clock, &mut applied, knobs);
+            let result = apply_knobs(&mut parts, &mut clock, &mut applied, knobs, cycle);
             if let Err(reason) = &result {
                 warn!(%reason, "pipeline change refused");
             }
@@ -195,6 +197,7 @@ fn video_loop(
             match mi01.write_chunks(&chunks) {
                 Ok(_) => {
                     write_failures = 0;
+                    params.pipeline.note_written();
                     report.messages_sent += 1;
                     report.keyframes_sent += u64::from(message.is_keyframe());
                     debug!(
@@ -263,6 +266,7 @@ fn apply_knobs(
     clock: &mut KeyframeClock,
     current: &mut PipelineKnobs,
     new: PipelineKnobs,
+    cycle: bool,
 ) -> Result<(), String> {
     let rate_changed =
         new.bitrate_kbps != current.bitrate_kbps || new.vbv_buffer_ms != current.vbv_buffer_ms;
@@ -270,9 +274,10 @@ fn apply_knobs(
         || new.fps != current.fps
         || new.preset != current.preset
         || new.tune_zerolatency != current.tune_zerolatency
-        || (rate_changed && !parts.pipeline.live_rate());
+        || (rate_changed && !parts.pipeline.live_rate())
+        || cycle;
     if rebuild {
-        rebuild_pipeline(parts, current, &new)?;
+        rebuild_pipeline(parts, current, &new, cycle)?;
         clock.set_interval(new.keyframe_interval);
         clock.keyframe_forced();
     } else {
@@ -302,15 +307,13 @@ fn rebuild_pipeline(
     parts: &mut LoopParts<'_, '_>,
     current: &PipelineKnobs,
     new: &PipelineKnobs,
+    cycle: bool,
 ) -> Result<(), String> {
     let builder = parts
         .pipeline
         .builder()
         .ok_or("this pipeline cannot rebuild the encoder")?;
-    let mut next = builder
-        .build(new.encoder_settings())
-        .map_err(|e| e.to_string())?;
-    probe_encoder(next.as_mut(), new.geometry.size())?;
+    let mut next = probe_build(builder, new)?;
 
     let retargeted = new.area != current.area || new.fps != current.fps;
     if retargeted {
@@ -322,7 +325,7 @@ fn rebuild_pipeline(
         }
     }
     let size = new.geometry.size();
-    if size != current.geometry.size() {
+    if cycle || size != current.geometry.size() {
         if let Err(e) = parts.session.renegotiate(size, parts.cycle_timeout) {
             if retargeted {
                 let _ = parts.capture.retarget(current.capture_target());
@@ -333,22 +336,6 @@ fn rebuild_pipeline(
     next.request_keyframe();
     parts.slot.replacement = Some(next);
     Ok(())
-}
-
-/// Encodes one black frame of the output size so an encoder that cannot work at it is found
-/// before anything else changes. The output is discarded.
-fn probe_encoder(encoder: &mut dyn Encoder, size: PictureSize) -> Result<(), String> {
-    let (width, height) = (size.width.0, size.height.0);
-    let stride = width as usize * 4;
-    let frame = Frame::new(
-        width,
-        height,
-        PixelFormat::Bgrx8888,
-        stride,
-        vec![0; stride * height as usize],
-    )
-    .map_err(|e| e.to_string())?;
-    encoder.encode(&frame).map(drop).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

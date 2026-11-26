@@ -4,10 +4,12 @@
 pub mod keys;
 pub mod plan;
 pub mod settings;
+pub mod transaction;
 pub mod types;
 
 pub use self::plan::{plan_change, plan_change_with};
 pub use self::types::{
-    ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan, SettingKey,
-    SettingsError, SettingsPatch,
+    ChangeClass, Committed, LiveSettings, PlanOptions, Planned, Prepared, Reconfig, ReconfigAction,
+    ReconfigError, ReconfigPlan, ReconfigTarget, SettingKey, SettingsError, SettingsPatch,
+    Verified,
 };

@@ -119,6 +119,7 @@ impl FakeDock {
                 rejected_size: None,
                 launch_sizes: Vec::new(),
                 drop_after: None,
+                drop_after_launch: None,
             }),
             config,
             stop: AtomicBool::new(false),
@@ -227,6 +228,12 @@ impl FakeDock {
         self.inner.lock().drop_after = Some(messages);
     }
 
+    /// Like [`drop_session_after`](Self::drop_session_after), counted from the next
+    /// `app-launched` instead of from now.
+    pub fn drop_session_after_next_launch(&self, messages: u64) {
+        self.inner.lock().drop_after_launch = Some(messages);
+    }
+
     /// Stops the fake and joins its thread.
     pub fn stop(mut self) {
         self.shutdown();
@@ -316,6 +323,9 @@ fn handle_host_report(
             });
             if let Some(size) = launched_at {
                 state.launch_sizes.push(size);
+            }
+            if let Some(messages) = state.drop_after_launch.take() {
+                state.drop_after = Some(messages);
             }
             let refused = launched_at.is_some() && launched_at == state.rejected_size;
             if let (Some(id), Some(delay)) = (id, inner.config.launch_reply_delay) {

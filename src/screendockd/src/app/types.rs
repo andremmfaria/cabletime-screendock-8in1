@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -93,6 +94,29 @@ pub trait PipelineHandle: Send {
 
     /// Executes a plan whose steps are all supported. The error text is shown to the client.
     fn apply(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+
+    /// Builds and checks the new pieces without changing anything visible. The default does
+    /// nothing.
+    fn prepare(&mut self, _plan: &ReconfigPlan, _settings: &LiveSettings) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Checks that the pipeline works after a change was applied. The default accepts.
+    fn verify(&mut self, _plan: &ReconfigPlan, _settings: &LiveSettings) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Puts the previous settings back; `plan` is the change from the failed settings to
+    /// them. The default applies it like any other plan.
+    fn restore(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        self.apply(plan, settings)
+    }
+
+    /// Brings a pipeline in an unknown state back to `settings`, which are the last ones that
+    /// worked. The default does nothing.
+    fn resync(&mut self, _settings: &LiveSettings) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// A pipeline that can only record the follow setting; every other step is unsupported.
@@ -106,6 +130,8 @@ pub struct Supervisor {
     pub(super) pipeline: Box<dyn PipelineHandle>,
     pub(super) extra: BTreeMap<String, String>,
     pub(super) changes_applied: u64,
+    /// Why the daemon is degraded: a change failed and so did putting the old settings back.
+    pub(super) degraded: Option<String>,
 }
 
 /// The encoder settings the supervisor can change while the video loop runs.
@@ -162,6 +188,8 @@ pub(super) struct PipelineShared {
     pub(super) version: u64,
     pub(super) applied_version: u64,
     pub(super) failure: Option<(u64, String)>,
+    /// Run the dock cycle for `version` even when the picture size did not change.
+    pub(super) force_cycle: bool,
 }
 
 /// Hand-over between the supervisor and the video loop. The supervisor publishes new knobs
@@ -172,6 +200,10 @@ pub struct PipelineState {
     pub(super) done: Condvar,
     pub(super) live_rate: bool,
     pub(super) builder: Option<EncoderBuilder>,
+    /// The session the video loop runs against, for the verify stage.
+    pub(super) session: Mutex<Option<SessionHandle>>,
+    /// Video messages written so far.
+    pub(super) written: AtomicU64,
 }
 
 /// The pipeline handle of a running daemon: bit rate and keyframe interval changes go through
@@ -179,7 +211,15 @@ pub struct PipelineState {
 #[derive(Debug, Clone)]
 pub struct EncoderPipeline {
     pub(super) state: Arc<PipelineState>,
+    /// Session losses and written messages when the last change was applied.
+    pub(super) baseline: Option<(u64, u64)>,
 }
+
+/// How long a changed pipeline is watched for a session loss.
+pub(super) const VERIFY_WINDOW: Duration = Duration::from_secs(1);
+
+/// Video messages that must be written after a change before it counts as working.
+pub(super) const VERIFY_MESSAGES: u64 = 3;
 
 /// Longest the supervisor waits for the video loop to apply a change.
 pub(super) const APPLY_TIMEOUT: Duration = Duration::from_secs(3);

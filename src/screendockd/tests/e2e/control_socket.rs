@@ -108,10 +108,17 @@ fn ctl_set_applies_live_changes_and_rejects_what_the_pipeline_cannot_do() {
     let got = ctl(dir.path(), &["get", "follow-system-changes"]);
     assert_eq!(String::from_utf8(got.stdout).unwrap(), "false\n");
 
-    // Changing the size needs a dock cycle, which this pipeline cannot do.
+    // Changing the size needs a dock cycle, which a daemon started with --no-handshake cannot run;
+    // the change is refused before anything is touched and the daemon stays healthy.
     let rejected = ctl(dir.path(), &["set", "resolution", "1600x900"]);
     assert_eq!(rejected.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&rejected.stderr).starts_with("rejected"));
+    let reason = String::from_utf8_lossy(&rejected.stderr).into_owned();
+    assert!(
+        reason.starts_with("rejected:") && reason.contains("handshake"),
+        "{reason}"
+    );
+    let status = ctl(dir.path(), &["status"]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("state: running"));
     let got = ctl(dir.path(), &["get", "resolution"]);
     assert_eq!(String::from_utf8(got.stdout).unwrap(), "1280x720\n");
 

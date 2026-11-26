@@ -43,7 +43,7 @@ screendockd [--config PATH] ctl [--socket PATH] set KEY VALUE
 screendockd [--config PATH] ctl [--socket PATH] reload
 ```
 
-`status` prints `name: value` lines: every setting plus `version` and `pid`. `get` without a key prints every setting in the same form; `get KEY` prints only the value. `set` and `reload` print `applied (CLASS): NAMES` with the settings that changed, or `applied (CLASS): nothing to change`. A command that fails prints its reason on standard error. A value that starts with a minus sign, such as `set x -20`, is read as a value.
+`status` prints `name: value` lines: every setting plus `version`, `pid`, `changes_applied` and `state`, which is `running` or `degraded`, with `degraded_reason` when degraded. `get` without a key prints every setting in the same form; `get KEY` prints only the value. `set` and `reload` print `applied (CLASS): NAMES` with the settings that changed, or `applied (CLASS): nothing to change`. A command that fails prints its reason on standard error. A value that starts with a minus sign, such as `set x -20`, is read as a value.
 
 | Exit code | Meaning |
 |---|---|
@@ -59,14 +59,18 @@ screendockd [--config PATH] ctl [--socket PATH] reload
 
 1. The key and value are read and the new settings are validated as a whole. A bad key, a value of the wrong type, a value out of range or a size that is odd or disagrees with the orientation gives `invalid` (exit code 4) and changes nothing.
 2. The change is classified (see [architecture.md](architecture.md#live-settings-and-change-classes)) into the steps it needs.
-3. If the running pipeline can do every step, they are executed and the answer is `applied` with the class and the names of the settings that changed. Setting a key to its current value is `applied` with no names.
+3. If the running pipeline can do every step, they are executed as a transaction (see below) and the answer is `applied` with the class and the names of the settings that changed. Setting a key to its current value is `applied` with no names.
 4. Otherwise the answer is `rejected` (exit code 2) with the steps the pipeline cannot do, and the settings stay as they were.
 
 The settings of the running daemon are not written to the config file; they last until the daemon exits. Requests are handled one at a time in arrival order.
 
 The running pipeline executes these changes: `bitrate`, `vbv-buffer-ms` and `keyframe-interval` on the running encoder, the follow setting, and the settings that only matter in extend mode (`placement`, `anchor`, `x`, `y`, `name` and `wayland-backend`) while the mode is `mirror`, which are recorded for the next switch to extend. Changes to `resolution`, `orientation`, `fps`, `preset` and `tune` rebuild the encoder in the video loop, retarget capture when the frame rate changes, and for a new picture size run the dock cycle (see [daemon.md](daemon.md#loops)). They are rejected when the daemon runs with `--no-handshake`, because there is no session to cycle. A change to `mode` needs steps the pipeline cannot do and is rejected.
 
-The video loop applies a bit rate or keyframe interval change at a frame boundary and the supervisor waits up to 3 seconds for it; a change that rebuilds the encoder or runs the dock cycle gets up to 15 seconds. If the encoder refuses the change, the answer is `rejected` with the encoder's reason and the previous values are restored. No dock handshake runs, no `app-launched` is sent and the heartbeat is not interrupted.
+The transaction has three stages. Prepare builds the new encoder aside and encodes one frame with it; an error here changes nothing. Commit puts the change into effect: the video loop swaps the encoder, retargets capture and runs the dock cycle. Verify watches the pipeline for 1 second: the session must not be lost, must be armed at the end, and at least 3 video messages must have been written since the change. A change that fails at commit or verify, and is more than live, is rolled back: the previous settings are put back, which for a size change runs the dock cycle again at the previous size. The answer is `rejected` with the reason and `rolled_back` true (`ctl` prints `rejected (rolled back): REASON`), and the live settings stay at the previous values. A live change has nothing to undo, so a refusal of one reports `rolled_back` false.
+
+If the rollback fails as well, the daemon is degraded. The answer is `rejected` with `rolled_back` false and a reason that names both failures. The live settings stay at the last values that worked, `status` shows `state: degraded` and `degraded_reason`, and nothing is retried on its own. The next `set` or `reload` first brings the pipeline back to the last good settings with a dock cycle at that size; when that fails the answer is `rejected` and the daemon stays degraded, and when it works `state` returns to `running` and the command goes on. `status` shows `state: running` otherwise.
+
+The video loop applies a bit rate or keyframe interval change at a frame boundary and the supervisor waits up to 3 seconds for it; a change that rebuilds the encoder or runs the dock cycle gets up to 15 seconds. If the encoder refuses the change, the answer is `rejected` with the encoder's reason and the previous values stay. No dock handshake runs, no `app-launched` is sent and the heartbeat is not interrupted.
 
 ### Class of every key
 

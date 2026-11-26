@@ -1,5 +1,7 @@
 //! Types of the live settings model: the settings, the patch, the change classes and the plan.
 
+use std::marker::PhantomData;
+
 use thiserror::Error;
 
 use crate::protocol::display::{DisplayError, DisplayGeometry, Orientation};
@@ -178,4 +180,68 @@ pub enum SettingKey {
     Name,
     WaylandBackend,
     FollowSystemChanges,
+}
+
+/// What a change is applied to. The transaction calls these in order; the target decides what
+/// each stage means for the running pipeline.
+pub trait ReconfigTarget {
+    /// Builds and checks the new pieces aside. Nothing visible changes.
+    fn prepare(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+
+    /// Puts the new settings into effect.
+    fn commit(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+
+    /// Checks that the pipeline works with the new settings.
+    fn verify(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+
+    /// Puts the previous settings back; `plan` is the change from the new settings to them.
+    fn restore(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String>;
+}
+
+/// Stage marker: the change is classified and nothing was done.
+#[derive(Debug)]
+pub struct Planned;
+
+/// Stage marker: the new pieces were built and checked aside.
+#[derive(Debug)]
+pub struct Prepared;
+
+/// Stage marker: the new settings are in effect and not yet verified.
+#[derive(Debug)]
+pub struct Committed;
+
+/// The end of a transaction that worked.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Verified {
+    pub settings: LiveSettings,
+}
+
+/// How a transaction failed.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ReconfigError {
+    /// A stage failed. `rolled_back` is true when the previous settings were put back.
+    #[error("{reason}")]
+    Rejected { reason: String, rolled_back: bool },
+    /// A stage failed and putting the previous settings back failed too.
+    #[error("{reason}; the rollback failed too: {rollback}")]
+    RollbackFailed { reason: String, rollback: String },
+}
+
+/// A change in progress, moving through [`Planned`], [`Prepared`] and [`Committed`] to
+/// [`Verified`]. Each step consumes the transaction, so a stage cannot be skipped or repeated.
+/// A committed transaction that is dropped before it is verified puts the previous settings
+/// back.
+pub struct Reconfig<'t, T: ReconfigTarget + ?Sized, S> {
+    pub(super) inner: Option<Inner<'t, T>>,
+    pub(super) stage: PhantomData<S>,
+}
+
+pub(super) struct Inner<'t, T: ?Sized> {
+    pub(super) target: &'t mut T,
+    pub(super) previous: LiveSettings,
+    pub(super) candidate: LiveSettings,
+    pub(super) plan: ReconfigPlan,
+    pub(super) inverse: ReconfigPlan,
+    /// True while the new settings are in effect and unverified.
+    pub(super) armed: bool,
 }

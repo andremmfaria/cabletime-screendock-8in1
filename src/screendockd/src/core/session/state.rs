@@ -140,6 +140,11 @@ impl SessionHandle {
         self.shared.losses.load(Ordering::Relaxed)
     }
 
+    /// True when the session has a handshake and so can run the dock cycle.
+    pub fn can_renegotiate(&self) -> bool {
+        self.commands.is_some()
+    }
+
     /// Runs the dock cycle at `size` and waits until the session is armed again. Video is held
     /// back while it runs and the heartbeat continues. An error reply from the dock fails it;
     /// a silent dock does not. On failure the session goes back to the previous size and redoes

@@ -1,13 +1,17 @@
 //! Hand-over of live encoder settings from the supervisor to the video loop.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard};
 use std::time::{Duration, Instant};
 
 pub use super::types::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
-use super::types::{PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT};
+use super::types::{
+    PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT, VERIFY_MESSAGES, VERIFY_WINDOW,
+};
 use crate::app::supervisor::PipelineHandle;
 use crate::core::reconfig::{ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
-use crate::ports::capture::{CaptureArea, CaptureTarget};
+use crate::core::session::SessionHandle;
+use crate::ports::capture::{CaptureArea, CaptureTarget, Frame, PixelFormat};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, DEFAULT_FPS};
 use crate::protocol::display::DisplayGeometry;
 use crate::utils::config::X264Preset;
@@ -98,11 +102,35 @@ impl PipelineState {
                 version: 0,
                 applied_version: 0,
                 failure: None,
+                force_cycle: false,
             }),
             done: std::sync::Condvar::new(),
             live_rate,
             builder,
+            session: std::sync::Mutex::new(None),
+            written: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// For the video loop: the session it runs against.
+    pub fn attach_session(&self, session: SessionHandle) {
+        *self.session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
+    }
+
+    fn session(&self) -> Option<SessionHandle> {
+        self.session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// For the video loop: counts one video message that reached the dock.
+    pub fn note_written(&self) {
+        self.written.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn written(&self) -> u64 {
+        self.written.load(Ordering::Relaxed)
     }
 
     /// For the video loop: how to build a new encoder, when the pipeline can.
@@ -128,6 +156,17 @@ impl PipelineState {
     pub fn publish(&self, knobs: PipelineKnobs) -> u64 {
         let mut shared = self.lock();
         shared.published = knobs;
+        shared.force_cycle = false;
+        shared.version += 1;
+        shared.version
+    }
+
+    /// Like [`publish`](Self::publish), and the video loop runs the dock cycle at the
+    /// published size even when the size is the one it already has.
+    pub fn publish_with_cycle(&self, knobs: PipelineKnobs) -> u64 {
+        let mut shared = self.lock();
+        shared.published = knobs;
+        shared.force_cycle = true;
         shared.version += 1;
         shared.version
     }
@@ -154,10 +193,11 @@ impl PipelineState {
         }
     }
 
-    /// For the video loop: the newest published knobs when they are newer than `seen`.
-    pub fn pending(&self, seen: u64) -> Option<(u64, PipelineKnobs)> {
+    /// For the video loop: the newest published knobs when they are newer than `seen`, and
+    /// whether the dock cycle is demanded.
+    pub fn pending(&self, seen: u64) -> Option<(u64, PipelineKnobs, bool)> {
         let shared = self.lock();
-        (shared.version > seen).then_some((shared.version, shared.published))
+        (shared.version > seen).then_some((shared.version, shared.published, shared.force_cycle))
     }
 
     /// For the video loop: reports the result of applying `version`.
@@ -174,7 +214,33 @@ impl PipelineState {
 
 impl EncoderPipeline {
     pub fn new(state: Arc<PipelineState>) -> Self {
-        Self { state }
+        Self {
+            state,
+            baseline: None,
+        }
+    }
+
+    /// Publishes `knobs`, waits for the video loop to apply them and, when that fails, puts
+    /// the loop's previous knobs back.
+    fn publish_and_wait(
+        &self,
+        knobs: PipelineKnobs,
+        cycle: bool,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let previous = self.state.knobs();
+        let version = if cycle {
+            self.state.publish_with_cycle(knobs)
+        } else {
+            self.state.publish(knobs)
+        };
+        if let Err(reason) = self.state.wait_applied(version, timeout) {
+            // Put the old values back so the loop and the supervisor agree again.
+            let back = self.state.publish(previous);
+            let _ = self.state.wait_applied(back, timeout);
+            return Err(reason);
+        }
+        Ok(())
     }
 
     fn knobs_of(&self, settings: &LiveSettings) -> PipelineKnobs {
@@ -225,21 +291,105 @@ impl PipelineHandle for EncoderPipeline {
         if !touches_encoder {
             return Ok(());
         }
-        let previous = self.state.knobs();
-        let version = self.state.publish(self.knobs_of(settings));
+        if let Some(session) = self.state.session() {
+            self.baseline = Some((session.losses(), self.state.written()));
+        }
         let timeout = if plan.class() == ChangeClass::Live {
             APPLY_TIMEOUT
         } else {
             CYCLE_APPLY_TIMEOUT
         };
-        if let Err(reason) = self.state.wait_applied(version, timeout) {
-            // Put the old values back so the loop and the supervisor agree again.
-            let back = self.state.publish(previous);
-            let _ = self.state.wait_applied(back, timeout);
-            return Err(reason);
+        self.publish_and_wait(self.knobs_of(settings), false, timeout)?;
+        Ok(())
+    }
+
+    fn prepare(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        let no_cycle = plan.actions().contains(&ReconfigAction::RunDockCycle)
+            && self
+                .state
+                .session()
+                .is_some_and(|session| !session.can_renegotiate());
+        if no_cycle {
+            return Err(
+                "the session runs without a handshake, so the dock cycle is unavailable".into(),
+            );
+        }
+        if !plan.actions().contains(&ReconfigAction::RebuildEncoder) {
+            return Ok(());
+        }
+        let builder = self
+            .state
+            .builder()
+            .ok_or("this pipeline cannot rebuild the encoder")?;
+        let knobs = self.knobs_of(settings);
+        probe_build(builder, &knobs).map(drop)
+    }
+
+    fn verify(&mut self, plan: &ReconfigPlan, _settings: &LiveSettings) -> Result<(), String> {
+        let Some(session) = self.state.session() else {
+            return Ok(());
+        };
+        if plan.class() == ChangeClass::Live {
+            return Ok(());
+        }
+        let (losses, written) = self
+            .baseline
+            .take()
+            .unwrap_or((session.losses(), self.state.written()));
+        let deadline = Instant::now() + VERIFY_WINDOW;
+        loop {
+            if session.losses() > losses {
+                return Err("the dock lost the session after the change".into());
+            }
+            if let Some(reason) = session.fatal() {
+                return Err(format!("the session ended after the change: {reason}"));
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !session.is_armed() {
+            return Err("the session is not armed after the change".into());
+        }
+        if self.state.written().saturating_sub(written) < VERIFY_MESSAGES {
+            return Err("video did not flow after the change".into());
         }
         Ok(())
     }
+
+    fn restore(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        let cycle = plan.actions().contains(&ReconfigAction::RunDockCycle);
+        self.publish_and_wait(self.knobs_of(settings), cycle, CYCLE_APPLY_TIMEOUT)
+    }
+
+    fn resync(&mut self, settings: &LiveSettings) -> Result<(), String> {
+        self.publish_and_wait(self.knobs_of(settings), true, CYCLE_APPLY_TIMEOUT)
+    }
+}
+
+/// Builds an encoder for `knobs` and encodes one black frame with it, so an encoder that
+/// cannot work at that size is found before anything else changes.
+pub(super) fn probe_build(
+    builder: &EncoderBuilder,
+    knobs: &PipelineKnobs,
+) -> Result<Box<dyn Encoder>, String> {
+    let mut encoder = builder
+        .build(knobs.encoder_settings())
+        .map_err(|e| e.to_string())?;
+    let size = knobs.geometry.size();
+    let (width, height) = (size.width.0, size.height.0);
+    let stride = width as usize * 4;
+    let frame = Frame::new(
+        width,
+        height,
+        PixelFormat::Bgrx8888,
+        stride,
+        vec![0; stride * height as usize],
+    )
+    .map_err(|e| e.to_string())?;
+    encoder.encode(&frame).map_err(|e| e.to_string())?;
+    Ok(encoder)
 }
 
 #[cfg(test)]
@@ -271,7 +421,7 @@ mod tests {
             let mut seen = 0;
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
-                if let Some((version, knobs)) = state.pending(seen) {
+                if let Some((version, knobs, _)) = state.pending(seen) {
                     seen = version;
                     let result = if knobs.bitrate_kbps < refuse_bitrate_below {
                         Err("encoder refused".to_string())

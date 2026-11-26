@@ -72,6 +72,8 @@ pub(super) struct DockState {
     pub(super) launch_sizes: Vec<(u32, u32)>,
     /// Video messages left before the session is dropped.
     pub(super) drop_after: Option<u64>,
+    /// Video message count to arm `drop_after` with at the next `app-launched`.
+    pub(super) drop_after_launch: Option<u64>,
 }
 
 /// Side effect applied when a scheduled message is sent.

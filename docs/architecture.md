@@ -45,6 +45,7 @@ The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC con
 | `ports::control` | `Command` (a request with its reply sender, or a reload), `ControlClient` and `ControlError` | Implemented |
 | `adapters::control` | `ControlServer` (the 0600 Unix socket and its accept thread, removed on drop) and `UnixControlClient`; `socket_path` resolves the path from the config | Implemented, unit tested, tested against the daemon binary |
 | `app::supervisor` | `Supervisor`, the single owner of the live settings: handles `Command`s, validates and classifies each change with `plan_change_with`, applies it through a `PipelineHandle` or rejects it, and answers `status` and `get`. Config reload and SIGHUP use the same path. See [control.md](control.md#changing-settings) | Implemented, unit tested |
+| `core::reconfig::transaction` | The `Reconfig` transaction over a `ReconfigTarget`: prepare, commit, verify and rollback as typestates | Implemented, unit tested |
 | `core::reconfig::keys` | The names of the live settings on the control interface: `SettingKey`, `setting_values`, `changed_keys` and `answer_read`, which answers `status` and `get` | Implemented, unit tested |
 | `core::keyframe` | `KeyframeClock`: which frames the encoder is asked to make keyframes, with an interval that can change while it runs | Implemented, unit tested |
 | `app::pipeline` | `PipelineState` (hand-over of bit rate and keyframe interval from the supervisor to the video loop) and `EncoderPipeline`, the `PipelineHandle` of a running daemon | Implemented, unit tested |
@@ -66,7 +67,7 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 | `protocol` | `ControlRequest`, `ControlResponse`, `ControlWireError`, the control line caps, `ReportId`, `FrameHeader`, `ParsedMessage`, `MessageBuilder`, `FramingError`, the report size constants, `AnnexBError`, the NAL type constants, `Orientation`, `DisplayGeometry`, `DisplayError`, `SessionId`, `SessionIdError`, `DockMessage`, `InboundAssembler`, the host message constants |
 | `ports` | `Command`, `ControlClient`, `ControlError`, `OutputId`, `Rect`, `DisplayServer`, `OutputFacts`, `DisplayFacts`, `Frame`, `PixelFormat`, `CaptureBackend`, `CaptureError`, `Encoder`, `VideoMessage`, `EncoderSettings`, `RateSettings`, `EncodeError`, `DockTransport`, `TransportError`, `WriteTimings` |
 | `core` | `KeyframeClock`, the session timing defaults and polling constants, and the display policy types `DisplayDecision`, `ExtendBackend`, `X11Tier`, `VirtualSupport` and `DisplayPolicyError` |
-| `core::reconfig` | `SettingKey`, `LiveSettings`, `SettingsPatch`, `SettingsError`, `ChangeClass`, `ReconfigAction`, `ReconfigPlan`, `PlanOptions` and the range limits |
+| `core::reconfig` | `SettingKey`, `LiveSettings`, `SettingsPatch`, `SettingsError`, `ChangeClass`, `ReconfigAction`, `ReconfigPlan`, `PlanOptions`, `ReconfigTarget`, `Reconfig`, `Planned`, `Prepared`, `Committed`, `Verified`, `ReconfigError` and the range limits |
 | `core::session` | `Session`, `SessionState`, `SessionHandle`, `SessionStats`, `SessionSettings`, `SessionError`, the shared state, the controller and reader event types |
 | `adapters` | nothing of its own; the subdirectories hold the adapter types |
 | `adapters::control` | `ControlServer`, `UnixControlClient`, the socket path, timeout and size constants |
@@ -94,6 +95,8 @@ Every source directory has a `types.rs` that holds the declarations of that dire
 | placement, anchor, position in extend mode | live | `RetargetCapture` |
 | monitor name or Wayland backend in extend mode | rebuild | `RecreateMonitor`, `RetargetCapture`, `RebuildEncoder` |
 | follow system changes | live | `SetFollow` |
+
+`core::reconfig::Reconfig` applies a change as a transaction over a `ReconfigTarget`: `Reconfig<Planned>` is prepared into `Reconfig<Prepared>`, committed into `Reconfig<Committed>` and verified into `Verified`. Each step consumes the transaction, so a stage cannot be skipped. A failure before the commit changes nothing, a failure at the commit or at verify of a change that is more than live restores the previous settings through the target, and a `Committed` transaction dropped without verification restores them as well. The supervisor in `app/` runs every change this way and implements `ReconfigTarget` for its `PipelineHandle`; if the restore fails, the supervisor reports the daemon as degraded.
 
 Placement, name and backend changes in mirror mode need no action; the new values are kept for the next switch to extend. A plan with no actions is a no-op.
 

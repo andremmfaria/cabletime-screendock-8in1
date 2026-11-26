@@ -5,6 +5,12 @@
 //! classifies it with [`plan_change_with`] and either hands it to the pipeline or rejects it,
 //! so no other thread mutates settings and every route shares one path. Policy lives here;
 //! the pipeline handle only executes steps.
+//!
+//! A change runs as a [`Reconfig`] transaction: prepare, commit, verify. A change that fails
+//! at the commit or verify stage is rolled back to the settings that last worked and answered
+//! `rejected` with `rolled_back`. If the rollback fails as well the daemon is degraded: the
+//! settings stay at the last good ones, `status` says so, and the next change or reload first
+//! tries to bring the pipeline back to them.
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
@@ -14,11 +20,29 @@ use tracing::{info, info_span, warn};
 pub use super::types::{NullPipeline, PipelineHandle, ReloadFn, Supervisor};
 use crate::core::reconfig::keys::{answer_read, changed_keys};
 use crate::core::reconfig::{
-    plan_change_with, ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan,
-    SettingKey, SettingsPatch,
+    plan_change_with, ChangeClass, LiveSettings, PlanOptions, Reconfig, ReconfigAction,
+    ReconfigError, ReconfigPlan, ReconfigTarget, SettingKey, SettingsPatch,
 };
 use crate::ports::control::Command;
 use crate::protocol::control::{ControlRequest, ControlResponse};
+
+impl<T: PipelineHandle + ?Sized> ReconfigTarget for T {
+    fn prepare(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        PipelineHandle::prepare(self, plan, settings)
+    }
+
+    fn commit(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        self.apply(plan, settings)
+    }
+
+    fn verify(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        PipelineHandle::verify(self, plan, settings)
+    }
+
+    fn restore(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+        PipelineHandle::restore(self, plan, settings)
+    }
+}
 
 impl PipelineHandle for NullPipeline {
     fn supported(&self) -> Vec<ReconfigAction> {
@@ -67,6 +91,7 @@ impl Supervisor {
             pipeline,
             extra: BTreeMap::new(),
             changes_applied: 0,
+            degraded: None,
         }
     }
 
@@ -76,9 +101,14 @@ impl Supervisor {
         self
     }
 
-    /// The settings the daemon is running with.
+    /// The settings the daemon is running with: the last ones that worked.
     pub fn settings(&self) -> &LiveSettings {
         &self.live
+    }
+
+    /// Why the daemon is degraded, when it is.
+    pub fn degraded(&self) -> Option<&str> {
+        self.degraded.as_deref()
     }
 
     /// Serves commands until every sender is gone.
@@ -122,6 +152,18 @@ impl Supervisor {
             ControlRequest::Status {} | ControlRequest::Get { .. } => {
                 let mut extra = self.extra.clone();
                 extra.insert("changes_applied".into(), self.changes_applied.to_string());
+                extra.insert(
+                    "state".into(),
+                    if self.degraded.is_some() {
+                        "degraded"
+                    } else {
+                        "running"
+                    }
+                    .into(),
+                );
+                if let Some(reason) = &self.degraded {
+                    extra.insert("degraded_reason".into(), reason.clone());
+                }
                 answer_read(&self.live, request, extra).expect("read requests are answered")
             }
         }
@@ -137,8 +179,8 @@ impl Supervisor {
         }
     }
 
-    /// Validates, classifies and applies a patch. The settings change only when the pipeline
-    /// accepted every step.
+    /// Validates, classifies and applies a patch as a transaction. The settings change only
+    /// when every stage worked.
     fn apply(&mut self, patch: &SettingsPatch) -> ControlResponse {
         let span = info_span!("reconfig");
         let _guard = span.enter();
@@ -146,7 +188,20 @@ impl Supervisor {
             Ok(candidate) => candidate,
             Err(e) => return ControlResponse::invalid(e.to_string()),
         };
-        let plan = plan_change_with(&self.live, &candidate, self.pipeline.options());
+        if let Some(reason) = self.degraded.clone() {
+            // An explicit command is the retry: the pipeline goes back to the last good
+            // settings before anything new is attempted.
+            if let Err(error) = self.pipeline.resync(&self.live) {
+                warn!(%reason, %error, "the retry of a degraded daemon failed");
+                return ControlResponse::rejected(format!(
+                    "the daemon is degraded ({reason}) and the retry failed: {error}"
+                ));
+            }
+            info!("the pipeline is back at the last good settings");
+            self.degraded = None;
+        }
+        let options = self.pipeline.options();
+        let plan = plan_change_with(&self.live, &candidate, options);
         let changed: Vec<String> = changed_keys(&self.live, &candidate)
             .into_iter()
             .map(String::from)
@@ -169,13 +224,38 @@ impl Supervisor {
                 missing.join(", ")
             ));
         }
-        if let Err(reason) = self.pipeline.apply(&plan, &candidate) {
-            return ControlResponse::rejected(reason);
+
+        let inverse = plan_change_with(&candidate, &self.live, options);
+        let outcome = Reconfig::plan(&mut *self.pipeline, &self.live, &candidate, plan, inverse)
+            .prepare()
+            .and_then(Reconfig::commit)
+            .and_then(Reconfig::verify);
+        match outcome {
+            Ok(verified) => {
+                info!(class = %class, changed = ?changed, "settings changed");
+                self.live = verified.settings;
+                self.changes_applied += 1;
+                ControlResponse::Applied { class, changed }
+            }
+            Err(ReconfigError::Rejected {
+                reason,
+                rolled_back,
+            }) => {
+                warn!(%reason, rolled_back, "change rejected");
+                ControlResponse::Rejected {
+                    reason,
+                    rolled_back,
+                }
+            }
+            Err(ReconfigError::RollbackFailed { reason, rollback }) => {
+                warn!(%reason, %rollback, "rollback failed, the daemon is degraded");
+                let detail = format!("{reason}; the rollback failed too: {rollback}");
+                self.degraded = Some(detail.clone());
+                ControlResponse::rejected(format!(
+                    "{detail}; the daemon is degraded and keeps the last good settings"
+                ))
+            }
         }
-        info!(class = %class, changed = ?changed, "settings changed");
-        self.live = candidate;
-        self.changes_applied += 1;
-        ControlResponse::Applied { class, changed }
     }
 }
 
@@ -489,6 +569,175 @@ mod tests {
         ));
         drop(commands);
         thread.join().unwrap();
+    }
+
+    /// A pipeline that records every stage and fails the ones it is told to.
+    struct Staged {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        fail: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl Staged {
+        fn step(&mut self, name: &'static str) -> Result<(), String> {
+            self.calls.lock().unwrap().push(name);
+            if self.fail.lock().unwrap().contains(&name) {
+                Err(format!("{name} refused"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl PipelineHandle for Staged {
+        fn supported(&self) -> Vec<ReconfigAction> {
+            vec![
+                ReconfigAction::SetRate,
+                ReconfigAction::RebuildEncoder,
+                ReconfigAction::RunDockCycle,
+                ReconfigAction::RetargetCapture,
+            ]
+        }
+        fn options(&self) -> PlanOptions {
+            PlanOptions { live_rate: true }
+        }
+        fn apply(&mut self, _: &ReconfigPlan, _: &LiveSettings) -> Result<(), String> {
+            self.step("commit")
+        }
+        fn prepare(&mut self, _: &ReconfigPlan, _: &LiveSettings) -> Result<(), String> {
+            self.step("prepare")
+        }
+        fn verify(&mut self, _: &ReconfigPlan, _: &LiveSettings) -> Result<(), String> {
+            self.step("verify")
+        }
+        fn restore(&mut self, _: &ReconfigPlan, _: &LiveSettings) -> Result<(), String> {
+            self.step("restore")
+        }
+        fn resync(&mut self, _: &LiveSettings) -> Result<(), String> {
+            self.step("resync")
+        }
+    }
+
+    type Calls = Arc<Mutex<Vec<&'static str>>>;
+
+    fn staged(fail: &[&'static str]) -> (Supervisor, Calls) {
+        let (supervisor, calls, _) = staged_with_switch(fail);
+        (supervisor, calls)
+    }
+
+    /// Like `staged`, and the list of stages that fail can be changed afterwards.
+    fn staged_with_switch(fail: &[&'static str]) -> (Supervisor, Calls, Calls) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let failing = Arc::new(Mutex::new(fail.to_vec()));
+        let pipeline = Staged {
+            calls: Arc::clone(&calls),
+            fail: Arc::clone(&failing),
+        };
+        (
+            Supervisor::new(shipped(), Box::new(|| Ok(shipped())), Box::new(pipeline)),
+            calls,
+            failing,
+        )
+    }
+
+    #[test]
+    fn a_change_runs_prepare_commit_and_verify_in_order() {
+        let (mut supervisor, calls) = staged(&[]);
+        assert!(matches!(
+            ask(&mut supervisor, set("resolution", "1600x900")),
+            ControlResponse::Applied { .. }
+        ));
+        assert_eq!(*calls.lock().unwrap(), ["prepare", "commit", "verify"]);
+        assert_eq!(supervisor.settings().geometry.width().0, 1600);
+    }
+
+    #[test]
+    fn a_failed_prepare_changes_nothing_and_is_not_a_rollback() {
+        let (mut supervisor, calls) = staged(&["prepare"]);
+        match ask(&mut supervisor, set("resolution", "1600x900")) {
+            ControlResponse::Rejected {
+                reason,
+                rolled_back,
+            } => {
+                assert_eq!(reason, "prepare refused");
+                assert!(!rolled_back);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(*calls.lock().unwrap(), ["prepare"]);
+        assert_eq!(supervisor.settings(), &shipped());
+    }
+
+    #[test]
+    fn a_failed_commit_or_verify_rolls_back_and_keeps_the_old_settings() {
+        for stage in ["commit", "verify"] {
+            let (mut supervisor, calls) = staged(&[stage]);
+            match ask(&mut supervisor, set("resolution", "1600x900")) {
+                ControlResponse::Rejected {
+                    reason,
+                    rolled_back,
+                } => {
+                    assert_eq!(reason, format!("{stage} refused"));
+                    assert!(rolled_back, "{stage}");
+                }
+                other => panic!("{other:?}"),
+            }
+            assert_eq!(calls.lock().unwrap().last(), Some(&"restore"), "{stage}");
+            assert_eq!(supervisor.settings(), &shipped());
+            assert!(supervisor.degraded().is_none());
+        }
+    }
+
+    #[test]
+    fn a_failed_rollback_degrades_the_daemon_and_the_next_command_resyncs_first() {
+        let (mut supervisor, calls, failing) = staged_with_switch(&["commit", "restore"]);
+        match ask(&mut supervisor, set("resolution", "1600x900")) {
+            ControlResponse::Rejected {
+                reason,
+                rolled_back,
+            } => {
+                assert!(!rolled_back);
+                assert!(reason.contains("degraded"), "{reason}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(supervisor.degraded().is_some());
+        assert_eq!(supervisor.settings(), &shipped());
+        match ask(&mut supervisor, ControlRequest::Status {}) {
+            ControlResponse::Status { fields } => {
+                assert_eq!(fields["state"], "degraded");
+                assert!(fields["degraded_reason"].contains("restore refused"));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        calls.lock().unwrap().clear();
+        failing.lock().unwrap().clear();
+        assert!(matches!(
+            ask(&mut supervisor, set("bitrate", "2000")),
+            ControlResponse::Applied { .. }
+        ));
+        assert_eq!(
+            *calls.lock().unwrap(),
+            ["resync", "prepare", "commit", "verify"]
+        );
+        assert!(supervisor.degraded().is_none());
+    }
+
+    #[test]
+    fn a_live_change_the_pipeline_refuses_is_not_a_rollback() {
+        let (mut supervisor, calls) = staged(&["commit"]);
+        match ask(&mut supervisor, set("bitrate", "2000")) {
+            ControlResponse::Rejected {
+                reason,
+                rolled_back,
+            } => {
+                assert_eq!(reason, "commit refused");
+                assert!(!rolled_back);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(*calls.lock().unwrap(), ["prepare", "commit"]);
+        assert!(supervisor.degraded().is_none());
     }
 
     #[test]
