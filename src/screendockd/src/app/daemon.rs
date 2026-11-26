@@ -111,6 +111,7 @@ fn video_loop(
     let mut clock = KeyframeClock::new(params.pipeline.knobs().keyframe_interval);
     let mut applied = params.pipeline.knobs();
     let mut seen = 0u64;
+    let mut edid_noted = false;
     let mut slot = EncoderSlot {
         base: base_encoder,
         replacement: None,
@@ -128,6 +129,12 @@ fn video_loop(
 
     while !stop.load(Ordering::Relaxed) && params.max_frames.is_none_or(|m| report.frames_sent < m)
     {
+        if !edid_noted {
+            if let Some(bytes) = session.dock_edid() {
+                params.pipeline.note_dock_edid(bytes);
+                edid_noted = true;
+            }
+        }
         if let Some((version, knobs, cycle)) = params.pipeline.pending(seen) {
             seen = version;
             // The change runs here, on the only thread that writes video, so nothing is

@@ -31,7 +31,7 @@ The command line option `--config PATH` bypasses this order and loads that file 
 | `virtual_display.fallback` | string | `mirror` | `mirror` continues in mirror mode and reports the reason when the monitor cannot be created; `fail` ends startup with an error. Read when the monitor is created |
 | `virtual_display.wayland_backend` | string | `auto` | `auto`, `mutter`, `portal` or `wlroots`. `auto` picks Mutter on GNOME, a headless output on sway, and the portal where it offers a virtual source. Live key |
 | `virtual_display.follow_system_changes` | boolean | true | Follow size, rotation and position changes made in the desktop's display settings. Live key |
-| `virtual_display.edid` | string | `dock` | `dock` uses the dock's EDID with synthetic values when the dock sent none; `synthetic` always uses synthetic values. Read when the monitor is created |
+| `virtual_display.edid` | string | `dock` | `dock` uses the dock's EDID with synthetic values when the dock sent none; `synthetic` always uses synthetic values. It also decides what the read-only `edid-*` keys of `ctl status` report: the dock's EDID, the cached one, or the configured size. Read when the monitor is created |
 | `virtual_display.restore_on_exit` | boolean | true | Restore the previous layout when the daemon exits. Read when the monitor is created |
 | `control.enabled` | boolean | true | Serve the control socket |
 | `control.socket` | string | empty | Socket path. Empty uses `$XDG_RUNTIME_DIR/screendockd/control.sock` |

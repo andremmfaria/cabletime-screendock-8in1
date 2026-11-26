@@ -110,6 +110,10 @@ The monitor name is reduced to printable ASCII: it stops at a line feed, drops c
 
 Layout of the dock's own message: 258 bytes, which are the base block, one CTA extension block (tag 2, revision 3) and two trailing zero bytes. The base block declares one extension, so the parser takes 256 bytes and reports 2 trailing bytes; the two bytes are zero in the captured message and carry no information the driver uses. The dock states the name `HDMI Extender`, a 62 by 34 cm picture, a preferred timing of 1920x1080 at 60 Hz and the modes 1920x1080, 1280x720, 1280x960, 1280x800, 1280x1024 and 1600x900, all at 60 Hz.
 
+The reader checks that the dock's EDID parses before it forwards it. A usable EDID reaches the session controller as an event and the session keeps the last one (`SessionHandle::dock_edid`); one that fails to parse is logged and dropped, and the answer with id 103 is sent either way.
+
+Cache: the daemon's video loop hands the dock's EDID to the pipeline state, which stores it through the `EdidStore` port when it differs from the cached copy. The file adapter keeps it at `dock-edid.bin` in the `screendockd` directory below `$XDG_STATE_HOME` (default `~/.local/state`), written through a temporary file with mode 0600 in a directory with mode 0700; a failed write is logged and does not stop the daemon. A cache file that is empty, larger than 32 KiB or not a regular file is ignored, and cached bytes that do not parse are skipped. The reported display facts come from the dock's EDID of this run, else the cache, else the configured size with the name `ScreenDock`; they are shown as read-only keys (see [control.md](control.md#read-only-keys)).
+
 ## Annex-B splitting
 
 `protocol::annexb::messages_from_annexb` turns an Annex-B byte stream into dock messages: SPS, PPS and SEI NAL units accumulate and are bundled with the IDR slice that follows into one message; a non-IDR slice is its own message; access unit delimiters and other NAL types are dropped. Start codes are kept on every NAL. This is used by the validation tools to replay a real stream.

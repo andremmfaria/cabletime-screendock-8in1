@@ -2,5 +2,6 @@
 //! discovery that finds the nodes.
 
 pub mod discovery;
+pub mod edid_cache;
 pub mod hidraw;
 pub mod types;

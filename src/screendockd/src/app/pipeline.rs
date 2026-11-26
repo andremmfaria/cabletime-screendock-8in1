@@ -1,20 +1,26 @@
 //! Hand-over of live encoder settings from the supervisor to the video loop.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard};
 use std::time::{Duration, Instant};
 
-pub use super::types::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use super::types::{
-    PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT, VERIFY_MESSAGES, VERIFY_WINDOW,
+    DisplayState, PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT, VERIFY_MESSAGES,
+    VERIFY_WINDOW,
 };
+pub use super::types::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use crate::app::supervisor::PipelineHandle;
+use crate::core::display_info::DisplayInfo;
 use crate::core::reconfig::{ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::session::SessionHandle;
 use crate::ports::capture::{CaptureArea, CaptureTarget, Frame, PixelFormat};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, DEFAULT_FPS};
+use crate::ports::transport::EdidStore;
 use crate::protocol::display::DisplayGeometry;
 use crate::utils::config::X264Preset;
+use crate::utils::types::EdidSource;
+use tracing::warn;
 
 impl EncoderBuilder {
     pub fn new(
@@ -109,7 +115,63 @@ impl PipelineState {
             builder,
             session: std::sync::Mutex::new(None),
             written: std::sync::atomic::AtomicU64::new(0),
+            display: std::sync::Mutex::new(DisplayState {
+                store: None,
+                prefer: EdidSource::Dock,
+                fallback: (0, 0),
+                cached: None,
+                dock: None,
+            }),
         })
+    }
+
+    /// Sets where the dock's EDID is cached and what to report when none is known, and loads
+    /// the cached bytes.
+    pub fn configure_display(
+        &self,
+        store: Option<Arc<dyn EdidStore>>,
+        prefer: EdidSource,
+        fallback: (u16, u16),
+    ) {
+        let cached = store.as_ref().and_then(|s| s.load());
+        let mut display = self.display.lock().unwrap_or_else(|e| e.into_inner());
+        *display = DisplayState {
+            store,
+            prefer,
+            fallback,
+            cached,
+            dock: display.dock.take(),
+        };
+    }
+
+    /// For the video loop: the dock sent its EDID. A copy that differs from the cache is
+    /// stored.
+    pub fn note_dock_edid(&self, bytes: Vec<u8>) {
+        let mut display = self.display.lock().unwrap_or_else(|e| e.into_inner());
+        if display.dock.as_ref() == Some(&bytes) {
+            return;
+        }
+        if display.cached.as_ref() != Some(&bytes) {
+            if let Some(store) = &display.store {
+                if let Err(e) = store.save(&bytes) {
+                    warn!(error = %e, "couldn't cache the dock's EDID");
+                }
+            }
+            display.cached = Some(bytes.clone());
+        }
+        display.dock = Some(bytes);
+    }
+
+    /// The read-only display facts: source, name, native mode and mode list.
+    pub fn display_fields(&self) -> BTreeMap<String, String> {
+        let display = self.display.lock().unwrap_or_else(|e| e.into_inner());
+        DisplayInfo::resolve(
+            display.dock.as_deref(),
+            display.cached.as_deref(),
+            display.prefer,
+            display.fallback,
+        )
+        .fields()
     }
 
     /// For the video loop: the session it runs against.
@@ -253,6 +315,10 @@ impl EncoderPipeline {
 }
 
 impl PipelineHandle for EncoderPipeline {
+    fn display_fields(&self) -> BTreeMap<String, String> {
+        self.state.display_fields()
+    }
+
     fn supported(&self) -> Vec<ReconfigAction> {
         let mut actions = vec![
             ReconfigAction::SetKeyframeInterval,

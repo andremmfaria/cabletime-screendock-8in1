@@ -185,6 +185,20 @@ Steps to verify the size the panel used:
 
 Status: requires on-device validation of the picture size at each change.
 
+## Dock EDID cache
+
+Goal: confirm that a cold start caches the dock's EDID and that `ctl status` reports it. Needs the dock freshly replugged (a dock that holds a session sends no EDID) and a running `screendockd run`.
+
+1. Remove the cache file if present: `rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/screendockd/dock-edid.bin"`.
+2. Replug the dock and start `screendockd run`.
+3. Run `screendockd ctl status` and read `edid-source`, `edid-name`, `edid-native` and `edid-modes`; run `ctl get edid-modes`.
+4. Check that the cache file exists with mode 0600, and compare it with `tests/fixtures/dock_edid.bin` using `cmp` (the fixture holds all 258 bytes the dock sent when it was captured).
+5. Stop the daemon, start it again without replugging and read the same keys before the dock answers anything: the source is `cache` until a dock EDID arrives, and stays `cache` when the dock holds its session and sends none.
+
+Expected: `dock`, `HDMI Extender`, `1920x1080@60` and the six modes `1920x1080@60,1280x720@60,1280x960@60,1280x800@60,1280x1024@60,1600x900@60`.
+
+The parser and the fake dock cover this path with the captured bytes. Status: requires on-device validation of the cache file written by the Rust daemon and of the reported values on a cold start.
+
 ## Dry runs without a dock
 
 The same commands run against regular files, which checks the tooling itself and not the device:

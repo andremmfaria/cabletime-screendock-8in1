@@ -12,9 +12,11 @@ use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigP
 use crate::core::session::{SessionError, SessionHandle, SessionSettings};
 use crate::ports::capture::{CaptureArea, CaptureBackend};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings};
+use crate::ports::transport::EdidStore;
 use crate::protocol::display::DisplayGeometry;
 use crate::protocol::framing::ReportId;
 use crate::utils::config::X264Preset;
+use crate::utils::types::EdidSource;
 
 /// Consecutive failed frames after which the daemon gives up.
 pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
@@ -112,6 +114,11 @@ pub trait PipelineHandle: Send {
         self.apply(plan, settings)
     }
 
+    /// Read-only facts about the dock's panel for `status` and `get`. The default has none.
+    fn display_fields(&self) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+
     /// Brings a pipeline in an unknown state back to `settings`, which are the last ones that
     /// worked. The default does nothing.
     fn resync(&mut self, _settings: &LiveSettings) -> Result<(), String> {
@@ -204,6 +211,18 @@ pub struct PipelineState {
     pub(super) session: Mutex<Option<SessionHandle>>,
     /// Video messages written so far.
     pub(super) written: AtomicU64,
+    /// What is known about the dock's panel, and where it is cached.
+    pub(super) display: Mutex<DisplayState>,
+}
+
+/// The dock's EDID as the pipeline state tracks it.
+#[derive(Debug)]
+pub(super) struct DisplayState {
+    pub(super) store: Option<Arc<dyn EdidStore>>,
+    pub(super) prefer: EdidSource,
+    pub(super) fallback: (u16, u16),
+    pub(super) cached: Option<Vec<u8>>,
+    pub(super) dock: Option<Vec<u8>>,
 }
 
 /// The pipeline handle of a running daemon: bit rate and keyframe interval changes go through

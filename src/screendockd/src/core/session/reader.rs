@@ -6,6 +6,7 @@ use super::types::DockEvent;
 use super::{send_control, SessionState, Shared, SharedWriter};
 use crate::core::policy::POLL_SLICE;
 use crate::ports::transport::DockTransport;
+use crate::protocol::edid::Edid;
 use crate::protocol::inbound::{parse_dock_message, DockMessage, InboundAssembler};
 use crate::protocol::messages;
 
@@ -45,10 +46,18 @@ pub(super) fn reader_thread(
             DockMessage::Ready => {
                 let _ = events.send(DockEvent::Ready);
             }
-            DockMessage::Passthrough { id, .. } => {
+            DockMessage::Passthrough { id, data } => {
                 if id == Some(messages::EDID_PASSTHROUGH_ID) {
                     if let Err(e) = send_control(writer, messages::EDID_ACK) {
                         warn!(error = %e, "couldn't answer the dock's EDID passthrough");
+                    }
+                    if let Some(bytes) = data {
+                        match Edid::parse(&bytes) {
+                            Ok(_) => {
+                                let _ = events.send(DockEvent::Edid(bytes));
+                            }
+                            Err(e) => warn!(error = %e, "the dock's EDID is not usable"),
+                        }
                     }
                 }
             }

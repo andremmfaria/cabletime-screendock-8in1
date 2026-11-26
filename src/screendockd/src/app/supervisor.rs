@@ -150,7 +150,18 @@ impl Supervisor {
             }
             ControlRequest::Reload {} => self.reload_from_file(),
             ControlRequest::Status {} | ControlRequest::Get { .. } => {
+                let read_only = self.pipeline.display_fields();
+                if let ControlRequest::Get { key: Some(key) } = request {
+                    if let Some(value) = read_only.get(key) {
+                        return ControlResponse::Values {
+                            values: BTreeMap::from([(key.clone(), value.clone())]),
+                        };
+                    }
+                }
                 let mut extra = self.extra.clone();
+                if matches!(request, ControlRequest::Status {}) {
+                    extra.extend(read_only.clone());
+                }
                 extra.insert("changes_applied".into(), self.changes_applied.to_string());
                 extra.insert(
                     "state".into(),
@@ -164,7 +175,14 @@ impl Supervisor {
                 if let Some(reason) = &self.degraded {
                     extra.insert("degraded_reason".into(), reason.clone());
                 }
-                answer_read(&self.live, request, extra).expect("read requests are answered")
+                let mut answer =
+                    answer_read(&self.live, request, extra).expect("read requests are answered");
+                if let (ControlResponse::Values { values }, ControlRequest::Get { key: None }) =
+                    (&mut answer, request)
+                {
+                    values.extend(read_only);
+                }
+                answer
             }
         }
     }
@@ -534,6 +552,60 @@ mod tests {
         file_settings.lock().unwrap().follow_system_changes = false;
         supervisor.handle(Command::Reload);
         assert!(!supervisor.settings().follow_system_changes);
+    }
+
+    struct WithDisplay;
+
+    impl PipelineHandle for WithDisplay {
+        fn supported(&self) -> Vec<ReconfigAction> {
+            NullPipeline.supported()
+        }
+        fn options(&self) -> PlanOptions {
+            NullPipeline.options()
+        }
+        fn apply(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
+            NullPipeline.apply(plan, settings)
+        }
+        fn display_fields(&self) -> BTreeMap<String, String> {
+            BTreeMap::from([
+                ("edid-name".to_string(), "Panel".to_string()),
+                ("edid-modes".to_string(), "1280x720@60".to_string()),
+            ])
+        }
+    }
+
+    #[test]
+    fn display_facts_are_read_only_keys_of_status_and_get() {
+        let mut supervisor = Supervisor::new(
+            shipped(),
+            Box::new(|| Err("unused".to_string())),
+            Box::new(WithDisplay),
+        );
+        match ask(&mut supervisor, ControlRequest::Status {}) {
+            ControlResponse::Status { fields } => assert_eq!(fields["edid-name"], "Panel"),
+            other => panic!("{other:?}"),
+        }
+        let one = ControlRequest::Get {
+            key: Some("edid-modes".into()),
+        };
+        match ask(&mut supervisor, one) {
+            ControlResponse::Values { values } => {
+                assert_eq!(values.len(), 1);
+                assert_eq!(values["edid-modes"], "1280x720@60");
+            }
+            other => panic!("{other:?}"),
+        }
+        match ask(&mut supervisor, ControlRequest::Get { key: None }) {
+            ControlResponse::Values { values } => {
+                assert_eq!(values["edid-name"], "Panel");
+                assert_eq!(values["mode"], "mirror");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            ask(&mut supervisor, set("edid-name", "x")),
+            ControlResponse::Invalid { .. }
+        ));
     }
 
     #[test]

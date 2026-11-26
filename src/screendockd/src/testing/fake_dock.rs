@@ -36,8 +36,15 @@ impl FakeDockConfig {
             launch_reply_delay: Some(Duration::from_millis(30)),
             started_reply: StartedReply::Allowed,
             send_edid: true,
+            edid_payload: None,
             holds_session: false,
         }
+    }
+
+    /// Makes the EDID passthrough carry `bytes`.
+    pub fn with_edid(mut self, bytes: Vec<u8>) -> Self {
+        self.edid_payload = Some(bytes);
+        self
     }
 
     /// A dock that already holds a session from an earlier host process: it heartbeats, never
@@ -409,11 +416,14 @@ fn tick(inner: &Inner, sock: &UnixDatagram, state: &mut DockState) {
     if state.edid_pending && now >= state.next_edid {
         state.next_edid = now + Duration::from_millis(150);
         let seq = state.seq;
-        let edid = pretty(
-            "common.data_passthrough",
-            Some("{\n\t\t\"id\":\t101,\n\t\t\"size\":\t258,\n\t\t\"data\":\t\"AAAA\"\n\t}"),
-            seq,
+        let (size, data) = match &inner.config.edid_payload {
+            Some(bytes) => (bytes.len(), base64(bytes)),
+            None => (3, "AAAA".to_string()),
+        };
+        let params = format!(
+            "{{\n\t\t\"id\":\t101,\n\t\t\"size\":\t{size},\n\t\t\"data\":\t\"{data}\"\n\t}}"
         );
+        let edid = pretty("common.data_passthrough", Some(&params), seq);
         send(sock, state, &edid);
     }
     let mut due = Vec::new();
@@ -477,4 +487,23 @@ fn drain_video(video: &UnixDatagram, state: &mut DockState, buf: &mut [u8]) {
             state.video.layout_violations += 1;
         }
     }
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }

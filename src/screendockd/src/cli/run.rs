@@ -14,6 +14,7 @@ use signal_hook::iterator::Signals;
 use crate::adapters::capture::create_backend;
 use crate::adapters::control::{socket_path, ControlServer};
 use crate::adapters::encode::create_encoder;
+use crate::adapters::transport::edid_cache::{default_path as edid_cache_path, FileEdidStore};
 use crate::adapters::transport::hidraw::HidrawHandle;
 use crate::app::daemon::{self, DaemonParams, DEFAULT_MAX_CONSECUTIVE_ERRORS};
 use crate::app::pipeline::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
@@ -53,6 +54,13 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         PipelineKnobs::from_live(&live),
         encoder.supports_live_rate(),
         EncoderBuilder::new(move |settings| create_encoder(&kind, settings)),
+    );
+    pipeline.configure_display(
+        edid_cache_path().map(|path| {
+            Arc::new(FileEdidStore::new(path)) as Arc<dyn crate::ports::transport::EdidStore>
+        }),
+        config.virtual_display.edid,
+        (geometry.width().0 as u16, geometry.height().0 as u16),
     );
     let services = Services::start(
         config,

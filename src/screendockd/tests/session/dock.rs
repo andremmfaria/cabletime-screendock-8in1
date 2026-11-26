@@ -3,6 +3,7 @@
 //! and no display are involved.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use screendockd::adapters::encode::prerecorded::PrerecordedEncoder;
@@ -11,8 +12,10 @@ use screendockd::app::pipeline::PipelineState;
 use screendockd::core::session::SessionSettings;
 use screendockd::ports::capture::{CaptureBackend, CaptureError, Frame, PixelFormat};
 use screendockd::ports::encode::EncoderSettings;
+use screendockd::ports::transport::EdidStore;
 use screendockd::protocol::display::{DisplayGeometry, Orientation};
 use screendockd::testing::fake_dock::{FakeDock, FakeDockConfig};
+use screendockd::utils::types::EdidSource;
 
 struct Solid;
 
@@ -231,4 +234,69 @@ fn lost_session_pauses_video_and_is_redone_without_restarting() {
     assert_eq!(report.session_losses, 1);
     assert_eq!(dock.video_stats().layout_violations, 0);
     assert_eq!(dock.format_violations(), 0);
+}
+
+const DOCK_EDID: &[u8] = include_bytes!("../fixtures/dock_edid.bin");
+
+#[derive(Debug, Default)]
+struct MemoryStore(Mutex<Option<Vec<u8>>>);
+
+impl EdidStore for MemoryStore {
+    fn load(&self) -> Option<Vec<u8>> {
+        self.0.lock().unwrap().clone()
+    }
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        *self.0.lock().unwrap() = Some(bytes.to_vec());
+        Ok(())
+    }
+}
+
+fn run_briefly(
+    config: FakeDockConfig,
+    store: Arc<MemoryStore>,
+) -> std::collections::BTreeMap<String, String> {
+    let (_dock, mi00, mi01) = FakeDock::spawn_with_video(config);
+    let params = params(Some(4));
+    params
+        .pipeline
+        .configure_display(Some(store), EdidSource::Dock, (1280, 720));
+    let stop = AtomicBool::new(false);
+    run(mi00, mi01, &mut Solid, &mut encoder(), &params, &stop).unwrap();
+    params.pipeline.display_fields()
+}
+
+#[test]
+fn the_dock_edid_is_reported_and_cached_after_a_cold_start() {
+    let store = Arc::new(MemoryStore::default());
+    let fields = run_briefly(
+        FakeDockConfig::fresh().with_edid(DOCK_EDID.to_vec()),
+        Arc::clone(&store),
+    );
+    assert_eq!(fields["edid-source"], "dock");
+    assert_eq!(fields["edid-name"], "HDMI Extender");
+    assert_eq!(fields["edid-native"], "1920x1080@60");
+    assert_eq!(store.load().as_deref(), Some(DOCK_EDID));
+}
+
+#[test]
+fn a_dock_that_sends_no_edid_falls_back_to_the_cache_then_the_config() {
+    let cached = Arc::new(MemoryStore::default());
+    cached.save(DOCK_EDID).unwrap();
+    let fields = run_briefly(FakeDockConfig::holding_session(), cached);
+    assert_eq!(fields["edid-source"], "cache");
+    assert_eq!(fields["edid-name"], "HDMI Extender");
+
+    let empty = Arc::new(MemoryStore::default());
+    let fields = run_briefly(FakeDockConfig::holding_session(), Arc::clone(&empty));
+    assert_eq!(fields["edid-source"], "config");
+    assert_eq!(fields["edid-native"], "1280x720");
+    assert_eq!(empty.load(), None);
+}
+
+#[test]
+fn an_unusable_dock_edid_is_neither_reported_nor_cached() {
+    let store = Arc::new(MemoryStore::default());
+    let fields = run_briefly(FakeDockConfig::fresh(), Arc::clone(&store));
+    assert_eq!(fields["edid-source"], "config");
+    assert_eq!(store.load(), None);
 }

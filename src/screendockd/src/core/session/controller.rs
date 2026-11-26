@@ -108,6 +108,7 @@ impl Controller {
             };
             match self.events.recv_timeout(left.min(POLL_SLICE)) {
                 Ok(event) => {
+                    self.absorb(&event);
                     if let Some(found) = pick(&event) {
                         return Ok(Wait::Got(found));
                     }
@@ -119,7 +120,16 @@ impl Controller {
     }
 
     pub(super) fn drain_events(&self) {
-        while self.events.try_recv().is_ok() {}
+        while let Ok(event) = self.events.try_recv() {
+            self.absorb(&event);
+        }
+    }
+
+    /// Keeps what an event carries that outlives the wait that received it.
+    fn absorb(&self, event: &DockEvent) {
+        if let DockEvent::Edid(bytes) = event {
+            self.shared.set_edid(bytes.clone());
+        }
     }
 
     /// Waits up to the reply timeout for the reply to request `id`. `None` means nothing
@@ -290,6 +300,7 @@ impl Controller {
                     return MonitorEnd::Lost("dock announced ready".into());
                 }
                 Ok(DockEvent::Reply { .. }) => {}
+                Ok(event @ DockEvent::Edid(_)) => self.absorb(&event),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return MonitorEnd::Stopped,
             }

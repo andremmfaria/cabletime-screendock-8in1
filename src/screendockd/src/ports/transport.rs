@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-pub use super::types::{DockTransport, TransportError, WriteTimings};
+pub use super::types::{DockTransport, EdidStore, TransportError, WriteTimings};
 use crate::protocol::framing::{ParsedMessage, ReportId};
 
 impl DockTransport for Box<dyn DockTransport> {

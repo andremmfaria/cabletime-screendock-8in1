@@ -54,7 +54,12 @@ impl Shared {
             losses: AtomicU64::new(0),
             loss_reason: Mutex::new(None),
             fatal: Mutex::new(None),
+            edid: Mutex::new(None),
         }
+    }
+
+    pub(super) fn set_edid(&self, bytes: Vec<u8>) {
+        *self.edid.lock().unwrap_or_else(|e| e.into_inner()) = Some(bytes);
     }
 
     pub(super) fn set_size(&self, size: PictureSize) {
@@ -99,6 +104,15 @@ impl Shared {
 }
 
 impl SessionHandle {
+    /// The last EDID the dock sent in this run, if any.
+    pub fn dock_edid(&self) -> Option<Vec<u8>> {
+        self.shared
+            .edid
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub fn state(&self) -> SessionState {
         self.shared.state()
     }

@@ -373,3 +373,13 @@ pub enum ControlError {
 pub trait ControlClient {
     fn send(&self, request: &ControlRequest) -> Result<ControlResponse, ControlError>;
 }
+
+/// Where the dock's EDID is kept between runs. Implementations hold raw bytes and never
+/// interpret them.
+pub trait EdidStore: Send + Sync + std::fmt::Debug {
+    /// The stored bytes, or `None` when nothing usable is stored.
+    fn load(&self) -> Option<Vec<u8>>;
+
+    /// Replaces the stored bytes.
+    fn save(&self, bytes: &[u8]) -> io::Result<()>;
+}

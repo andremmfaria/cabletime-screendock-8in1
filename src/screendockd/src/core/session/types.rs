@@ -134,6 +134,8 @@ pub(super) enum DockEvent {
         result: Option<Value>,
         error: Option<Value>,
     },
+    /// The dock's EDID, already checked to parse.
+    Edid(Vec<u8>),
 }
 
 /// Session settings. `handshake: false` keeps only the heartbeat thread and arms video
@@ -199,6 +201,8 @@ pub(super) struct Shared {
     pub(super) losses: AtomicU64,
     pub(super) loss_reason: Mutex<Option<String>>,
     pub(super) fatal: Mutex<Option<String>>,
+    /// The last EDID the dock sent.
+    pub(super) edid: Mutex<Option<Vec<u8>>>,
 }
 
 /// Cheap, cloneable view of a running session for the video loop.

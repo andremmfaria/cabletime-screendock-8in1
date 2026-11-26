@@ -91,6 +91,17 @@ The libx264 encoder changes its rate in place when the linked libavcodec applies
 
 `ctl reload` and SIGHUP both make the daemon read the config file again: the file given with `--config`, or the first file of the resolution order in [configuration.md](configuration.md#config-file). The new file's settings are compared with the live settings, and only the differences are applied through the same path as `set`, as one change: if any difference is rejected, nothing is applied. This also reverts a setting changed with `set` to the file's value. A file that cannot be read or parsed is reported as `rejected` with the reason and changes nothing. SIGHUP has no client to answer, so its result is logged: `config reloaded` with the class and the changed names at info level, or `config reload failed` with the reason at warn level.
 
+## Read-only keys
+
+`status` and `get` also carry facts about the dock's panel. They cannot be set; `ctl set` with one of these names is invalid. `get` without a key lists them with the settings, and `get` with one of these names returns just that value.
+
+| Key | Value |
+|---|---|
+| `edid-source` | `dock` when the dock sent its EDID in this run, `cache` when only an earlier run's EDID is stored, `config` when neither exists or `virtual_display.edid` is `synthetic` |
+| `edid-name` | The monitor name from the EDID, or `ScreenDock` |
+| `edid-native` | The preferred mode as `WIDTHxHEIGHT@HZ`, or just the size when the refresh rate is unknown (the `config` source) |
+| `edid-modes` | The mode list, comma separated, in the same notation: detailed timings, then standard timings |
+
 ## Settings
 
 | Key | Value | Setting |

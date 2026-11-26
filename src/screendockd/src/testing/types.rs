@@ -29,6 +29,8 @@ pub struct FakeDockConfig {
     pub started_reply: StartedReply,
     /// Send the EDID passthrough (id 101) after `app-launched`, repeating until answered.
     pub send_edid: bool,
+    /// Bytes of the EDID passthrough; `None` sends a three byte placeholder that is no EDID.
+    pub edid_payload: Option<Vec<u8>>,
     /// Start with a projection session already held (no announcements, no replies needed).
     pub holds_session: bool,
 }

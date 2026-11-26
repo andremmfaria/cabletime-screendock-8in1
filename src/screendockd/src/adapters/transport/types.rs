@@ -129,3 +129,12 @@ pub struct HidrawHandle {
     pub(super) file: File,
     pub(super) channel: ReportId,
 }
+
+/// Largest cached EDID that is read back: 255 extension blocks plus the base block.
+pub const MAX_CACHED_EDID: u64 = 256 * 128;
+
+/// An [`EdidStore`](crate::ports::transport::EdidStore) over one file.
+#[derive(Debug, Clone)]
+pub struct FileEdidStore {
+    pub(super) path: std::path::PathBuf,
+}

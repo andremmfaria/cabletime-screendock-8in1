@@ -6,6 +6,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::ports::display::OutputId;
+use crate::protocol::edid::EdidMode;
 
 /// How long to wait for the dock's ready announcement before deciding whether it already
 /// holds a session.
@@ -88,4 +89,27 @@ pub enum DisplayPolicyError {
     /// The anchor names no output.
     #[error("anchor output {0:?} was not found")]
     UnknownAnchor(String),
+}
+
+/// The monitor name used when the dock supplies none.
+pub const DEFAULT_MONITOR_NAME: &str = "ScreenDock";
+
+/// Where the dock's identity data in a [`DisplayInfo`] came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayInfoSource {
+    /// The EDID the dock sent during this run.
+    Dock,
+    /// The EDID stored by an earlier run.
+    Cache,
+    /// The configured picture size; the dock sent no EDID or the config asks for none.
+    Config,
+}
+
+/// What is known about the dock's panel: a name, the native mode and the mode list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisplayInfo {
+    pub source: DisplayInfoSource,
+    pub name: String,
+    pub native: EdidMode,
+    pub modes: Vec<EdidMode>,
 }
