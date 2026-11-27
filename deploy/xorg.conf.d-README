@@ -1,0 +1,1 @@
+This directory is read by the X server of the ScreenDock terminal (screendock-xorg.service) in place of the distribution's xorg.conf.d snippets. It is empty on purpose. Files named *.conf placed here are merged with /etc/screendockd/xorg.conf.

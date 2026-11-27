@@ -1,0 +1,20 @@
+# deploy/screendock-xorg.service
+# System service: X server with the dummy video driver for the dock terminal. It is bound to the
+# dock's device unit (see 98-screendock-system.rules), so it runs only while the dock is plugged
+# in and stops on unplug. Packages install it to /usr/lib/systemd/system/.
+[Unit]
+Description=X server for the ScreenDock terminal
+Documentation=file:///usr/share/doc/screendockd/install.md
+BindsTo=dev-screendock.device
+After=dev-screendock.device
+
+[Service]
+User=screendock
+Group=screendock
+SupplementaryGroups=input
+RuntimeDirectory=screendock
+RuntimeDirectoryMode=0755
+LogsDirectory=screendock
+ExecStart=/usr/libexec/screendockd/xorg-start
+Restart=on-failure
+RestartSec=2

@@ -1,0 +1,17 @@
+# deploy/screendock-terminal.service
+# System service: a login prompt on the dock panel. xterm runs /bin/login as root on the dock's X
+# display and restarts after each logout so the prompt returns. Started by
+# 98-screendock-system.rules on plug and stopped with screendock-xorg.service on unplug.
+# Packages install it to /usr/lib/systemd/system/.
+[Unit]
+Description=Login prompt on the ScreenDock
+Documentation=file:///usr/share/doc/screendockd/install.md
+Requires=screendock-xorg.service
+After=screendock-xorg.service
+
+[Service]
+Environment=DISPLAY=:70
+Environment=XAUTHORITY=/run/screendock/Xauthority
+ExecStart=/usr/libexec/screendockd/terminal-start
+Restart=always
+RestartSec=1

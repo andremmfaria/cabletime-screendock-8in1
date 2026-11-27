@@ -1,0 +1,29 @@
+#!/bin/sh
+# Creates the screendock user and group for the system terminal and activates the units and the
+# udev rules. The reload and trigger steps run only when systemd is the running init.
+set -e
+
+case "$1" in
+configure)
+    if ! getent group screendock >/dev/null; then
+        groupadd --system screendock
+    fi
+    if ! getent passwd screendock >/dev/null; then
+        if getent group input >/dev/null; then
+            groups_option="--groups input"
+        else
+            groups_option=""
+        fi
+        # shellcheck disable=SC2086
+        useradd --system --gid screendock $groups_option --no-create-home \
+            --home-dir /nonexistent --shell /usr/sbin/nologin screendock
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload || true
+        udevadm control --reload || true
+        udevadm trigger --action=add --subsystem-match=hidraw || true
+    fi
+    ;;
+esac
+
+exit 0

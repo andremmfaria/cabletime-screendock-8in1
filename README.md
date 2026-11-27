@@ -41,7 +41,11 @@ sudo apt install ./screendockd_<version>_amd64.deb
 sudo dnf install ./screendockd-<version>-1.x86_64.rpm
 ```
 
-A package installs `/usr/bin/screendockd`, the udev rule, the systemd user unit at `/usr/lib/systemd/user/screendockd.service`, and a template config at `/etc/screendockd/screendock_cfg.toml`. The RPM needs `ffmpeg-libs` (RPM Fusion on Fedora). Packages do not create the `screendock` group or add you to it; do that in the next section.
+A package installs `/usr/bin/screendockd`, the udev rules, the systemd user unit at `/usr/lib/systemd/user/screendockd.service`, the system terminal units and X server config, and a template config at `/etc/screendockd/screendock_cfg.toml`. It creates the `screendock` user and group and depends on an X server with the dummy driver, `xterm` and `login`. The RPM needs `ffmpeg-libs` (RPM Fusion on Fedora). Packages do not add your user to the `screendock` group; see the permissions section.
+
+## Login prompt on the dock
+
+After a package install, plugging in the dock starts three system services: an Xorg server with the dummy driver, an `xterm` running `login` on it, and `screendockd` mirroring that display. The dock shows a login prompt that takes input from a keyboard attached to the machine. Unplugging the dock stops the services. To turn this off, for example on a desktop that runs the user service, run `sudo systemctl mask screendock-terminal.service screendockd-system.service`. Details are in [docs/install.md](docs/install.md#system-terminal).
 
 ## Permissions: udev rule and group
 

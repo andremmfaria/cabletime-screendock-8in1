@@ -1,0 +1,47 @@
+#!/bin/sh
+# Client side of the ScreenDock terminal on display :70.
+# usage: terminal-start            wait for the X server, set the root window, run xterm with login
+#        terminal-start --wait     only wait until the X socket exists (used by the daemon unit)
+#        terminal-start --dry-run  print the commands instead of running them
+# DISPLAY and XAUTHORITY come from the unit. Tools are found through PATH.
+set -eu
+
+socket=${X_SOCKET:-/tmp/.X11-unix/X70}
+
+bin() { command -v "$1" 2>/dev/null || echo "$1"; }
+
+wait_for_x() {
+    tries=0
+    while [ ! -S "$socket" ]; do
+        tries=$((tries + 1))
+        if [ "$tries" -gt 50 ]; then
+            echo "terminal-start: X socket $socket did not appear" >&2
+            exit 1
+        fi
+        sleep 0.2
+    done
+}
+
+case "${1:-}" in
+--wait)
+    wait_for_x
+    exit 0
+    ;;
+--dry-run)
+    echo "$(bin xsetroot) -solid black"
+    echo "$(bin xset) s off"
+    echo "$(bin xset) -dpms"
+    echo "$(bin xterm) -fa Monospace -fs 16 -bg black -fg #00ff66 -geometry 98x27+0+0 -e $(bin setsid) -wc $(bin login)"
+    exit 0
+    ;;
+esac
+
+wait_for_x
+"$(bin xsetroot)" -solid black || echo "terminal-start: xsetroot failed" >&2
+"$(bin xset)" s off || echo "terminal-start: xset s off failed" >&2
+# The dummy driver has no DPMS extension, so this call is expected to fail there.
+"$(bin xset)" -dpms >/dev/null 2>&1 || true
+# login needs its own session with the xterm pty as controlling terminal; without setsid -wc it
+# returns at once. -w keeps setsid in the foreground until login exits.
+exec "$(bin xterm)" -fa Monospace -fs 16 -bg black -fg '#00ff66' -geometry 98x27+0+0 \
+    -e "$(bin setsid)" -wc "$(bin login)"

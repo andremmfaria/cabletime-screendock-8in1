@@ -140,6 +140,10 @@ Layers, lowest first: `utils`, `protocol`, `ports`, `core`, `adapters`, `app`, `
 - Reads are parsed at the I/O boundary: `HidrawHandle::read_message` returns a `ParsedMessage`, never raw buffers.
 - `HidrawHandle` owns a `std::fs::File`, so the descriptor closes on drop. No method exposes the raw fd.
 
+## System terminal
+
+The packages ship three system units, a udev rule and two launchers that put a login prompt on the dock; the files are in `deploy/` and the user steps are in [install.md](install.md#system-terminal). The rule `98-screendock-system.rules` matches the hidraw node of USB interface 0 of `1de1:f201`, tags it `systemd`, aliases it to `/dev/screendock` and sets `SYSTEMD_WANTS`. `screendock-xorg.service` (bound to `dev-screendock.device`) runs Xorg with the dummy driver on display `:70` as the `screendock` user, `screendock-terminal.service` runs `xterm` with `login` as root on that display, and `screendockd-system.service` runs `screendockd run --backend x11` as `screendock` on the same display with `XAUTHORITY` set to `/run/screendock/Xauthority`. The daemon needs no code path of its own for this: it captures an X display and mirrors it like on any X11 desktop. The launchers `xorg-start` and `terminal-start` in `/usr/libexec/screendockd/` find the Xorg binary and the X clients in the places each distribution uses.
+
 ## Command line
 
 The command line lives in `src/screendockd/src/cli/`. The binary provides `discover`, `replay`, `isolate`, `capture`, `run`, `bench` and `ctl`. `replay` and `isolate` are the hardware validation tools described in [hardware-validation.md](hardware-validation.md). `capture` grabs frames from the desktop and writes them as PNG files, and needs no dock; see [capture.md](capture.md). `run` is the daemon, see [daemon.md](daemon.md). `bench` measures capture plus encode CPU time, see [encoding.md](encoding.md#cpu-measurement). `ctl` talks to a running daemon through its control socket, see [control.md](control.md).

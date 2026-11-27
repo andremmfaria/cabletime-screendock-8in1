@@ -1,0 +1,13 @@
+#!/bin/sh
+# Stops the system terminal services before the files go away.
+set -e
+
+case "$1" in
+remove | upgrade | deconfigure)
+    if [ -d /run/systemd/system ]; then
+        systemctl stop screendockd-system.service screendock-terminal.service screendock-xorg.service || true
+    fi
+    ;;
+esac
+
+exit 0

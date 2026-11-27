@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -121,6 +121,15 @@ assets = [
     ["target/release/screendockd", "usr/bin/screendockd", "755"],
     ["../../deploy/99-screendock.rules", "lib/udev/rules.d/99-screendock.rules", "644"],
     ["../../deploy/screendockd.service", "usr/lib/systemd/user/screendockd.service", "644"],
+    # System terminal: units, udev activation rule, X server config and the two launchers.
+    ["../../deploy/screendock-xorg.service", "usr/lib/systemd/system/screendock-xorg.service", "644"],
+    ["../../deploy/screendock-terminal.service", "usr/lib/systemd/system/screendock-terminal.service", "644"],
+    ["../../deploy/screendockd-system.service", "usr/lib/systemd/system/screendockd-system.service", "644"],
+    ["../../deploy/98-screendock-system.rules", "lib/udev/rules.d/98-screendock-system.rules", "644"],
+    ["../../deploy/screendock-xorg.conf", "etc/screendockd/xorg.conf", "644"],
+    ["../../deploy/xorg.conf.d-README", "etc/screendockd/xorg.conf.d/README", "644"],
+    ["../../deploy/libexec/xorg-start", "usr/libexec/screendockd/xorg-start", "755"],
+    ["../../deploy/libexec/terminal-start", "usr/libexec/screendockd/terminal-start", "755"],
     # Packaged default/template config. utils/config.rs's resolution order falls back to this
     # system-wide path (third step) when no per-user $XDG_CONFIG_HOME/screendockd/ config
     # exists yet - a package install can't pre-populate every future user's home directory, so
@@ -137,7 +146,12 @@ assets = [
 # libx264 encoder arrives through libavcodec's own dependencies. The libpipewire package is
 # also named explicitly, with the t64 variant that newer Debian-family releases use, so the
 # dependency stays when the derivation misses it.
-depends = "$auto, libpipewire-0.3-0t64 | libpipewire-0.3-0"
+# The system terminal needs an X server with the dummy driver and libinput, xauth, xset and
+# xsetroot, xterm, login and util-linux (setsid, mcookie).
+depends = "$auto, libpipewire-0.3-0t64 | libpipewire-0.3-0, xserver-xorg-core, xserver-xorg-video-dummy, xserver-xorg-input-libinput, xauth, x11-xserver-utils, xterm, login, util-linux"
+# Creates the screendock user and group, reloads systemd and udev, stops the services on removal
+# and deletes the user on purge. /etc files are conffiles automatically.
+maintainer-scripts = "../../deploy/debian"
 # The portal is how a Wayland desktop hands out screen streams.
 recommends = "xdg-desktop-portal"
 
@@ -145,10 +159,23 @@ recommends = "xdg-desktop-portal"
 # Paths/rationale mirror the [package.metadata.deb] section above.
 [package.metadata.generate-rpm]
 license = "MIT"
+# Scriptlets: the screendock user and group, systemd and udev reload, service stop on erase.
+pre_install_script = "../../deploy/rpm/pre-install.sh"
+post_install_script = "../../deploy/rpm/post-install.sh"
+pre_uninstall_script = "../../deploy/rpm/pre-uninstall.sh"
+post_uninstall_script = "../../deploy/rpm/post-uninstall.sh"
 assets = [
     { source = "target/release/screendockd", dest = "/usr/bin/screendockd", mode = "755" },
     { source = "../../deploy/99-screendock.rules", dest = "/usr/lib/udev/rules.d/99-screendock.rules", mode = "644" },
     { source = "../../deploy/screendockd.service", dest = "/usr/lib/systemd/user/screendockd.service", mode = "644" },
+    { source = "../../deploy/screendock-xorg.service", dest = "/usr/lib/systemd/system/screendock-xorg.service", mode = "644" },
+    { source = "../../deploy/screendock-terminal.service", dest = "/usr/lib/systemd/system/screendock-terminal.service", mode = "644" },
+    { source = "../../deploy/screendockd-system.service", dest = "/usr/lib/systemd/system/screendockd-system.service", mode = "644" },
+    { source = "../../deploy/98-screendock-system.rules", dest = "/usr/lib/udev/rules.d/98-screendock-system.rules", mode = "644" },
+    { source = "../../deploy/screendock-xorg.conf", dest = "/etc/screendockd/xorg.conf", mode = "644", config = "noreplace" },
+    { source = "../../deploy/xorg.conf.d-README", dest = "/etc/screendockd/xorg.conf.d/README", mode = "644" },
+    { source = "../../deploy/libexec/xorg-start", dest = "/usr/libexec/screendockd/xorg-start", mode = "755" },
+    { source = "../../deploy/libexec/terminal-start", dest = "/usr/libexec/screendockd/terminal-start", mode = "755" },
     # See the matching entry in [package.metadata.deb] above for why this ships a system-wide
     # template rather than relying solely on a per-user XDG config.
     { source = "../../config/screendock_cfg.toml", dest = "/etc/screendockd/screendock_cfg.toml", mode = "644" },
@@ -161,11 +188,20 @@ assets = [
 
 # The binary links libavcodec/libavformat/libavutil/libswscale (encode-ffmpeg feature);
 # ffmpeg-libs provides them with libx264 support on Fedora-family systems (RPM Fusion).
-[package.metadata.generate-rpm.requires]
-ffmpeg-libs = "*"
-# The binary links libpipewire-0.3 (capture-wayland feature).
-pipewire-libs = "*"
-
 # The portal is how a Wayland desktop hands out screen streams.
 [package.metadata.generate-rpm.recommends]
 xdg-desktop-portal = "*"
+
+# The system terminal needs an X server with the dummy driver and libinput. xauth, xset, xsetroot
+# and xterm are required by path because their package names differ between releases.
+[package.metadata.generate-rpm.requires]
+ffmpeg-libs = "*"
+pipewire-libs = "*"
+xorg-x11-server-Xorg = "*"
+xorg-x11-drv-dummy = "*"
+xorg-x11-drv-libinput = "*"
+"/usr/bin/xauth" = "*"
+"/usr/bin/xset" = "*"
+"/usr/bin/xsetroot" = "*"
+"/usr/bin/xterm" = "*"
+util-linux = "*"

@@ -16,7 +16,7 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [virtual-display.md](virtual-display.md) | The virtual monitor: display port, X11 tiers, placement and crash recovery |
 | [daemon.md](daemon.md) | The `run` daemon: startup, loops, error policy, shutdown, resolution picker, device section |
 | [testing.md](testing.md) | Test layers, how to run them, and what each one covers |
-| [install.md](install.md) | Installing from packages or source, permissions, the systemd user unit, running and troubleshooting |
+| [install.md](install.md) | Installing from packages or source, permissions, the system terminal on the dock, the systemd user unit, running and troubleshooting |
 | [hardware-validation.md](hardware-validation.md) | Procedures to run on the dock for write timing, heartbeat isolation, the streaming daemon and the resolution picker, and what to record |
 
 ## Device and research pages

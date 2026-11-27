@@ -1,0 +1,14 @@
+# deploy/98-screendock-system.rules
+# Starts the system terminal when the dock is plugged in and stops it when it is unplugged.
+# The first rule marks the hidraw node of USB interface 0 (kernel name "<port>:1.0"); the second
+# confirms the vendor and product on the USB device. They are separate rules because every
+# parent-matching key (KERNELS, SUBSYSTEMS, ATTRS) in one rule must match at the same parent:
+# bInterfaceNumber lives on the interface and idVendor on the USB device, one level higher.
+# The dock's hidraw node becomes the device unit dev-screendock.device (SYSTEMD_ALIAS), which
+# screendock-xorg.service is bound to; SYSTEMD_WANTS pulls in the other two services.
+SUBSYSTEM!="hidraw", GOTO="screendock_end"
+SUBSYSTEMS=="usb", KERNELS=="*:1.0", ENV{SCREENDOCK_INTERFACE0}="1"
+ENV{SCREENDOCK_INTERFACE0}!="1", GOTO="screendock_end"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1de1", ATTRS{idProduct}=="f201", TAG+="systemd", ENV{SYSTEMD_ALIAS}="/dev/screendock", ENV{SYSTEMD_WANTS}="screendockd-system.service screendock-terminal.service"
+LABEL="screendock_end"
+ENV{SCREENDOCK_INTERFACE0}=""

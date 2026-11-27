@@ -1,0 +1,37 @@
+#!/bin/sh
+# Starts the X server behind the ScreenDock terminal: creates the X authority file, then runs
+# Xorg with the dummy driver. The Xorg binary lives in a different place on each distribution
+# family, so it is looked up here instead of in the unit.
+# usage: xorg-start [--dry-run]   (--dry-run prints the commands instead of running them)
+# XORG_CANDIDATES overrides the search list; it exists for tests.
+set -eu
+
+display=:70
+authority=/run/screendock/Xauthority
+config=/etc/screendockd/xorg.conf
+configdir=/etc/screendockd/xorg.conf.d
+logfile=/var/log/screendock/xorg.log
+
+xorg=
+for candidate in ${XORG_CANDIDATES:-/usr/lib/xorg/Xorg /usr/libexec/Xorg /usr/bin/Xorg}; do
+    if [ -x "$candidate" ]; then
+        xorg=$candidate
+        break
+    fi
+done
+if [ -z "$xorg" ]; then
+    echo "xorg-start: no Xorg binary found" >&2
+    exit 1
+fi
+
+if [ "${1:-}" = "--dry-run" ]; then
+    echo "xauth -f $authority add $display . <cookie>"
+    echo "$xorg $display -config $config -configdir $configdir -auth $authority -logfile $logfile -noreset -sharevts -novtswitch -keeptty -nolisten tcp"
+    exit 0
+fi
+
+cookie=$(mcookie)
+rm -f "$authority"
+xauth -f "$authority" add "$display" . "$cookie"
+exec "$xorg" "$display" -config "$config" -configdir "$configdir" -auth "$authority" \
+    -logfile "$logfile" -noreset -sharevts -novtswitch -keeptty -nolisten tcp

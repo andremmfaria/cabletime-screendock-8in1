@@ -1,0 +1,23 @@
+# deploy/screendockd-system.service
+# System instance of the daemon: mirrors the dock terminal's X display (:70) to the dock. It runs
+# as the unprivileged screendock user, which has read and write access to the dock's hidraw nodes
+# through 99-screendock.rules. Its control socket is /run/screendockd/screendockd/control.sock.
+# Packages install it to /usr/lib/systemd/system/.
+[Unit]
+Description=CABLETIME ScreenDock (CB09W) userspace display driver, system instance
+Documentation=file:///usr/share/doc/screendockd/install.md
+Requires=screendock-xorg.service
+After=screendock-xorg.service screendock-terminal.service
+
+[Service]
+User=screendock
+Group=screendock
+RuntimeDirectory=screendockd
+Environment=DISPLAY=:70
+Environment=XAUTHORITY=/run/screendock/Xauthority
+Environment=XDG_RUNTIME_DIR=/run/screendockd
+ExecStartPre=/usr/libexec/screendockd/terminal-start --wait
+ExecStart=/usr/bin/screendockd run --backend x11
+ExecReload=/usr/bin/screendockd ctl reload
+Restart=on-failure
+RestartSec=2

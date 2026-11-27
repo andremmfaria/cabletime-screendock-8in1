@@ -42,6 +42,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y
           xvfb xorg xserver-xorg-video-dummy x11-xserver-utils sway grim
 
+      # Static checks of the system terminal files: launcher syntax and dry runs, the udev
+      # rule syntax and systemd-analyze verify of the three units. No root or hardware needed.
+      - name: Check the system terminal files
+        run: ../../deploy/check-deploy.sh
+
       - name: Check formatting (cargo fmt)
         run: cargo fmt --check
 
