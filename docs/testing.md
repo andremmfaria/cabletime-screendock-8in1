@@ -72,6 +72,8 @@ Requirements: `Xorg` with the `dummy` driver (Debian and Ubuntu packages `xserve
 - a new daemon undoes the monitor a killed one left;
 - `vdisplay probe` prints the outputs, the extend mechanism and the placement.
 
+`tests/capture/follow_x11.rs` uses `xrandr` as the outside party on the Xorg dummy server: a bare monitor redefined, moved or deleted, and an output given another mode, are each reported once as resized, moved or removed; the daemon's own resize on either tier and a change it has observed report nothing. `tests/e2e/follow_xorg.rs` runs the daemon loop against the simulated dock on the same server: an `xrandr` mode change on the monitor's output gives one dock cycle within 2 seconds with `app-launched` at the new size, a rebuilt encoder whose first output is a keyframe with parameter sets, capture retargeted to the new rectangle and no heartbeat gap of 2 seconds; a size set with `ctl` gives exactly one cycle and no echo; with `follow_system_changes` off the dock sees nothing; turning the output off reverts to mirror without a cycle. The watcher's unit tests use a scripted desktop: debounce, one report per change, announced changes, blinks and removal. The supervisor tests cover each kind of display event.
+
 The unit tests of `app::monitor` use a fake display provider: switching creates and drops the monitor, resizes follow the picture size, an unsupported desktop changes nothing, the start fallback follows the policy and a resync reconciles the monitor with the settings.
 
 ## Control socket

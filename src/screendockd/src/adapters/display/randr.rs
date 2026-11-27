@@ -6,7 +6,7 @@ use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::CURRENT_TIME;
 
 use super::facts::connect;
-use super::types::{RandrBackend, ScreenSize, XRandr};
+use super::types::{RandrBackend, RectSource, ScreenSize, WatchTarget, XRandr};
 use crate::ports::display::{OutputId, Rect, VdisplayError};
 
 fn request_err(e: impl std::fmt::Display) -> VdisplayError {
@@ -76,6 +76,76 @@ impl XRandr {
             .reply()
             .map_err(request_err)?
             .crtc)
+    }
+}
+
+impl RectSource for XRandr {
+    fn changes_pending(&mut self) -> Result<bool, VdisplayError> {
+        let mut any = false;
+        while self.conn.poll_for_event().map_err(request_err)?.is_some() {
+            any = true;
+        }
+        Ok(any)
+    }
+
+    fn rect(&mut self, target: &WatchTarget) -> Result<Option<Rect>, VdisplayError> {
+        match target {
+            WatchTarget::Monitor(name) => {
+                let atom = self.atom(name)?;
+                let monitors = self
+                    .conn
+                    .randr_get_monitors(self.root, true)
+                    .map_err(request_err)?
+                    .reply()
+                    .map_err(request_err)?
+                    .monitors;
+                Ok(monitors.iter().find(|m| m.name == atom).map(|m| {
+                    Rect::new(
+                        i32::from(m.x),
+                        i32::from(m.y),
+                        u32::from(m.width),
+                        u32::from(m.height),
+                    )
+                }))
+            }
+            WatchTarget::Output(output) => {
+                let crtc = self.crtc_of(*output)?;
+                if crtc == 0 {
+                    return Ok(None);
+                }
+                let info = self
+                    .conn
+                    .randr_get_crtc_info(crtc, 0)
+                    .map_err(request_err)?
+                    .reply()
+                    .map_err(request_err)?;
+                if info.mode == 0 {
+                    return Ok(None);
+                }
+                Ok(Some(Rect::new(
+                    i32::from(info.x),
+                    i32::from(info.y),
+                    u32::from(info.width),
+                    u32::from(info.height),
+                )))
+            }
+        }
+    }
+}
+
+impl XRandr {
+    /// Asks the server to send an event whenever the screen, a CRTC or an output changes.
+    pub fn select_layout_events(&self) -> Result<(), VdisplayError> {
+        self.conn
+            .randr_select_input(
+                self.root,
+                randr::NotifyMask::SCREEN_CHANGE
+                    | randr::NotifyMask::CRTC_CHANGE
+                    | randr::NotifyMask::OUTPUT_CHANGE,
+            )
+            .map_err(request_err)?
+            .check()
+            .map_err(request_err)
     }
 }
 

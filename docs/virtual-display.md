@@ -109,6 +109,20 @@ When the daemon starts in extend mode and the desktop cannot host a monitor, the
 
 On exit (SIGINT, SIGTERM or a normal end) the monitor is removed and the screen size restored.
 
+## Following changes made outside the daemon
+
+In extend mode the monitor's real rectangle is the source of truth. Changing the monitor's mode, size, rotation or position in the desktop's display settings, or with `xrandr`, leads the daemon to the same path as `ctl set`. A watcher thread holds its own connection to the X server, asks for RandR layout events and reads the monitor's rectangle once the layout has been quiet for 150 ms. It also looks every 500 ms, because a server need not send an event when only a monitor object changes. A rectangle that differs from the one the daemon expects is reported once:
+
+| What changed | What the daemon does |
+|---|---|
+| width or height (a rotation swaps them and sets the orientation) | the same change as `ctl set resolution`: the encoder is rebuilt with a new keyframe, capture follows the new rectangle and the dock cycle runs |
+| position | `placement` becomes `at` with the new `x` and `y`, and capture follows without a dock cycle |
+| the monitor is gone | the mode becomes `mirror`, logged and shown by `ctl get mode` |
+
+The monitor is watched through its bare RandR monitor (by name) or through the CRTC of its output. The daemon announces its own changes before it makes them, so a resize made by `ctl set resolution`, a reload or a rollback is not reported back and causes exactly one dock cycle. A monitor that is missing is read a second time before it counts as removed, because resizing a bare monitor removes it for an instant. A size the settings reject, such as an odd width, is not followed: the monitor is put back to the daemon's own size.
+
+With `follow_system_changes = false` the difference is logged and the daemon keeps its own size and position. The key is live. In mirror mode there is no monitor to follow. Whether a desktop's display settings list a bare monitor is up to the desktop; `xrandr` always works.
+
 ## Commands
 
 | Command | Output |

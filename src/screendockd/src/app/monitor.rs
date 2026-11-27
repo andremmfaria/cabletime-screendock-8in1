@@ -1,6 +1,7 @@
 //! The virtual monitor of a running daemon, kept in step with the live settings.
 
 use std::collections::BTreeMap;
+use std::sync::mpsc::Sender;
 
 pub use super::types::{MonitorManager, MonitorPipeline};
 use crate::app::supervisor::PipelineHandle;
@@ -8,6 +9,7 @@ use crate::core::display_policy::{decide, place_for_backend, place_monitor};
 use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::types::DisplayDecision;
 use crate::ports::capture::CaptureArea;
+use crate::ports::control::Command;
 use crate::ports::display::{DisplayProvider, MonitorName, MonitorSpec, Rect};
 use crate::utils::types::{DisplayMode, FallbackPolicy, VirtualDisplayConfig};
 use tracing::warn;
@@ -22,6 +24,29 @@ impl MonitorManager {
             provider,
             base,
             monitor: None,
+            events: None,
+        }
+    }
+
+    /// Reports changes made to the monitor from outside the daemon as
+    /// [`Command::Display`], for the monitor that exists now and every later one.
+    pub fn set_events(&mut self, events: Sender<Command>) {
+        self.events = Some(events);
+        self.follow();
+    }
+
+    fn follow(&mut self) {
+        if let (Some(events), Some(monitor)) = (self.events.clone(), self.monitor.as_mut()) {
+            monitor.follow(Box::new(move |event| {
+                let _ = events.send(Command::Display(event));
+            }));
+        }
+    }
+
+    /// Records that the monitor was moved or resized from outside the daemon.
+    pub fn observe(&mut self, rect: Rect) {
+        if let Some(monitor) = self.monitor.as_mut() {
+            monitor.observe(rect);
         }
     }
 
@@ -105,6 +130,7 @@ impl MonitorManager {
             .virtual_display(backend)
             .map_err(|e| e.to_string())?;
         self.monitor = Some(display.create(&spec).map_err(|e| e.to_string())?);
+        self.follow();
         Ok(())
     }
 
@@ -224,6 +250,10 @@ impl PipelineHandle for MonitorPipeline {
         let area = self.monitors.reconcile(settings)?;
         self.inner.set_area(area);
         self.inner.resync(settings)
+    }
+
+    fn observed(&mut self, rect: Rect) {
+        self.monitors.observe(rect);
     }
 }
 

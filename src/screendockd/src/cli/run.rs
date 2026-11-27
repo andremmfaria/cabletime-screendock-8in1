@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -48,10 +48,12 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
     let mi00_handle = HidrawHandle::open_mi00(&mi00).context("failed to open MI_00")?;
     let mi01_handle = HidrawHandle::open_mi01(&mi01).context("failed to open MI_01")?;
     let choice = args.backend.map_or(config.capture.backend, Into::into);
+    let (commands, inbox) = mpsc::channel();
     let mut monitors = MonitorManager::new(
         Box::new(SystemDisplayProvider::new()),
         config.virtual_display.clone(),
     );
+    monitors.set_events(commands.clone());
     let mut area = monitors.start(&live).map_err(|e| anyhow::anyhow!(e))?;
     // The monitor comes first: a Wayland capture of a monitor's stream attaches to the node
     // and never opens a portal session.
@@ -113,6 +115,7 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         config,
         live,
         reload_source(config_path.cloned()),
+        (commands, inbox),
         Box::new(MonitorPipeline::new(
             EncoderPipeline::new(std::sync::Arc::clone(&pipeline)),
             monitors,
@@ -162,9 +165,9 @@ impl Services {
         config: &Config,
         live: LiveSettings,
         reload: ReloadFn,
+        (commands, inbox): (Sender<Command>, Receiver<Command>),
         pipeline: Box<dyn PipelineHandle>,
     ) -> Result<Self> {
-        let (commands, inbox) = mpsc::channel();
         let halt = Arc::new(AtomicBool::new(false));
 
         let server = if config.control.enabled {
@@ -209,7 +212,10 @@ impl Services {
             let _ = thread.join();
         }
         drop(self.server.take());
-        drop(self.commands.take());
+        // The monitor's watcher holds a sender too, so the supervisor is told to stop.
+        if let Some(commands) = self.commands.take() {
+            let _ = commands.send(Command::Shutdown);
+        }
         if let Some(thread) = self.supervisor.take() {
             let _ = thread.join();
         }

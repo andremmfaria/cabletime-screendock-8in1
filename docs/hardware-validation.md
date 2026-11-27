@@ -233,6 +233,8 @@ Whether a desktop environment's display settings list a bare tier 2 monitor, and
 
 The `modesetting` driver on the i915 GPU cannot start without root here: Xorg reports `Cannot open /dev/tty0 (Permission denied)`, and `/dev/dri/card0` is `root:video` with mode 0660. Status: requires validation on a machine with a logged in X11 session and a real GPU driver.
 
+Changes made from outside the daemon were checked on the same server with `xrandr`: `--output DUMMY1 --mode <custom mode>` on the monitor's output, and `--delmonitor` followed by `--setmonitor` with a new geometry on a bare monitor, each reach the daemon as one resize within 2 seconds. The daemon's own resizes raise the same RandR events and are not reported. No event was observed for a deleted bare monitor on this server, so the daemon also looks at the monitor every 500 ms. Whether a desktop's display settings list the bare monitor is not validated.
+
 ## Headless sway
 
 Validated on the development host (Ubuntu 26.04, sway 1.11, `grim`) with sway started as the ordinary user on a private runtime directory:

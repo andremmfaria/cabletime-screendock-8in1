@@ -1,10 +1,52 @@
 //! Types of the display adapters.
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ports::display::{OutputId, Rect, VdisplayError, X11Tier};
+
+/// The rectangle the daemon expects its monitor to have, shared between the code that changes
+/// the monitor and its watcher. `None` while no rectangle is expected.
+pub type ExpectedRect = Arc<Mutex<Option<Rect>>>;
+
+/// Which part of the desktop a watcher reads the monitor's rectangle from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WatchTarget {
+    /// A RandR monitor, or a compositor output, called this.
+    Monitor(String),
+    /// A RandR output with a mode set, found through its CRTC.
+    Output(OutputId),
+}
+
+/// Where a watcher learns that the desktop layout changed and what the monitor looks like.
+pub trait RectSource: Send {
+    /// Takes every notification that arrived since the last call; true when there was one.
+    fn changes_pending(&mut self) -> Result<bool, VdisplayError>;
+
+    /// The monitor's rectangle now, or `None` when it does not exist.
+    fn rect(&mut self, target: &WatchTarget) -> Result<Option<Rect>, VdisplayError>;
+}
+
+/// A thread that reports changes made to the monitor from outside the daemon. Dropping it
+/// stops the thread.
+pub struct MonitorWatcher {
+    pub(super) stop: Arc<AtomicBool>,
+    pub(super) thread: Option<JoinHandle<()>>,
+}
+
+/// How long the layout must be quiet before the watcher looks at it, so a burst of
+/// notifications from one change is read once.
+pub const WATCH_DEBOUNCE: Duration = Duration::from_millis(150);
+/// How long the watcher goes without a look at the monitor, because a server need not send a
+/// notification when only a monitor object changes.
+pub(super) const WATCH_RECHECK: Duration = Duration::from_millis(500);
+/// How often the watcher looks for notifications and for its stop flag.
+pub(super) const WATCH_POLL: Duration = Duration::from_millis(20);
 
 /// Shows an existing output instead of creating a monitor: the monitor is the output's own
 /// rectangle and nothing is created or removed.
@@ -141,6 +183,9 @@ pub struct X11MonitorGuard<B: RandrBackend + Send> {
     pub(super) rect: Rect,
     pub(super) tier: X11Tier,
     pub(super) restore_on_drop: bool,
+    /// What the watcher compares the layout with; changed before every change we make.
+    pub(super) expected: ExpectedRect,
+    pub(super) watcher: Option<MonitorWatcher>,
 }
 
 /// Directory and file name of the recovery file under `$XDG_RUNTIME_DIR`.

@@ -6,10 +6,14 @@
 //! file records what is about to happen; dropping the monitor undoes every change and removes
 //! the file.
 
-use super::types::{RandrBackend, RecoveryState, RecoveryStore, ScreenSize, XRandr, MODE_PREFIX};
+use super::types::{
+    MonitorWatcher, RandrBackend, RecoveryState, RecoveryStore, ScreenSize, WatchTarget, XRandr,
+    MODE_PREFIX,
+};
 pub use super::types::{X11MonitorGuard, X11RandrDisplay};
 use crate::ports::display::{
-    MonitorSpec, OutputId, Rect, VdisplayError, VirtualDisplay, VirtualMonitor, X11Tier,
+    DisplayEventSink, MonitorSpec, OutputId, Rect, VdisplayError, VirtualDisplay, VirtualMonitor,
+    X11Tier,
 };
 
 impl X11RandrDisplay {
@@ -153,6 +157,8 @@ pub(super) fn create_monitor<B: RandrBackend + Send>(
         rect: spec.rect,
         tier,
         restore_on_drop: true,
+        expected: std::sync::Arc::new(std::sync::Mutex::new(Some(spec.rect))),
+        watcher: None,
     })
 }
 
@@ -199,6 +205,47 @@ impl<B: RandrBackend + Send> VirtualMonitor for X11MonitorGuard<B> {
     }
 
     fn resize(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError> {
+        // The watcher must expect the new rectangle before the server reports it.
+        self.expect(Some(spec.rect));
+        let result = self.change_to(spec);
+        if result.is_err() {
+            self.expect(Some(self.rect));
+        }
+        result
+    }
+
+    fn follow(&mut self, notify: DisplayEventSink) {
+        self.watcher = None;
+        let target = match (self.tier, &self.state.monitor) {
+            (X11Tier::RealOutput(output), _) => WatchTarget::Output(output),
+            (X11Tier::BareMonitor, Some(name)) => WatchTarget::Monitor(name.clone()),
+            (X11Tier::BareMonitor, None) => return,
+        };
+        let source = XRandr::connect(self.state.display.as_deref())
+            .and_then(|source| source.select_layout_events().map(|()| source));
+        match source {
+            Ok(source) => {
+                match MonitorWatcher::spawn(source, target, self.expected.clone(), notify) {
+                    Ok(watcher) => self.watcher = Some(watcher),
+                    Err(error) => tracing::warn!(%error, "could not start the monitor watcher"),
+                }
+            }
+            Err(error) => tracing::warn!(%error, "not following changes to the monitor"),
+        }
+    }
+
+    fn observe(&mut self, rect: Rect) {
+        self.rect = rect;
+        self.expect(Some(rect));
+    }
+}
+
+impl<B: RandrBackend + Send> X11MonitorGuard<B> {
+    fn expect(&self, rect: Option<Rect>) {
+        *self.expected.lock().unwrap_or_else(|e| e.into_inner()) = rect;
+    }
+
+    fn change_to(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError> {
         let size = grown(self.backend.screen_size()?, spec.rect)?;
         if size != self.backend.screen_size()? {
             self.backend.set_screen_size(size)?;
@@ -238,6 +285,8 @@ impl<B: RandrBackend + Send> X11MonitorGuard<B> {
 
 impl<B: RandrBackend + Send> Drop for X11MonitorGuard<B> {
     fn drop(&mut self) {
+        // Stop watching first: undoing the changes must not look like an outside change.
+        self.watcher = None;
         if !self.restore_on_drop {
             return;
         }

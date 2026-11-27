@@ -11,7 +11,8 @@ use thiserror::Error;
 use crate::core::reconfig::{LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::session::{SessionError, SessionHandle, SessionSettings};
 use crate::ports::capture::{CaptureArea, CaptureBackend};
-use crate::ports::display::{DisplayProvider, VirtualMonitor};
+use crate::ports::control::Command;
+use crate::ports::display::{DisplayProvider, Rect, VirtualMonitor};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings};
 use crate::ports::transport::EdidStore;
 use crate::protocol::display::DisplayGeometry;
@@ -126,6 +127,11 @@ pub trait PipelineHandle: Send {
     fn resync(&mut self, _settings: &LiveSettings) -> Result<(), String> {
         Ok(())
     }
+
+    /// The virtual monitor is at `rect` because something outside the daemon put it there.
+    /// The pipeline records it so the monitor is not moved back and the change is not
+    /// reported again. The default does nothing.
+    fn observed(&mut self, _rect: Rect) {}
 }
 
 /// A pipeline that can only record the follow setting; every other step is unsupported.
@@ -244,6 +250,8 @@ pub struct MonitorManager {
     pub(super) provider: Box<dyn DisplayProvider>,
     pub(super) base: VirtualDisplayConfig,
     pub(super) monitor: Option<Box<dyn VirtualMonitor>>,
+    /// Where the monitor's watcher sends what it sees; `None` follows nothing.
+    pub(super) events: Option<std::sync::mpsc::Sender<Command>>,
 }
 
 /// An [`EncoderPipeline`] that also manages the virtual monitor, so switching between mirror

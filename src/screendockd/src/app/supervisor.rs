@@ -24,7 +24,10 @@ use crate::core::reconfig::{
     ReconfigError, ReconfigPlan, ReconfigTarget, SettingKey, SettingsPatch,
 };
 use crate::ports::control::Command;
+use crate::ports::display::DisplayEvent;
 use crate::protocol::control::{ControlRequest, ControlResponse};
+use crate::protocol::display::Orientation;
+use crate::utils::types::{DisplayMode, Placement};
 
 impl<T: PipelineHandle + ?Sized> ReconfigTarget for T {
     fn prepare(&mut self, plan: &ReconfigPlan, settings: &LiveSettings) -> Result<(), String> {
@@ -116,6 +119,9 @@ impl Supervisor {
         let span = info_span!("supervisor");
         let _guard = span.enter();
         while let Ok(command) = inbox.recv() {
+            if matches!(command, Command::Shutdown) {
+                break;
+            }
             self.handle(command);
         }
     }
@@ -127,6 +133,8 @@ impl Supervisor {
                 let response = self.respond(&request);
                 let _ = reply.send(response);
             }
+            Command::Shutdown => {}
+            Command::Display(event) => self.follow_display(event),
             Command::Reload => match self.reload_from_file() {
                 ControlResponse::Applied { class, changed } => {
                     info!(class, changed = ?changed, "config reloaded");
@@ -136,6 +144,61 @@ impl Supervisor {
                 }
                 other => warn!(?other, "unexpected reload answer"),
             },
+        }
+    }
+
+    /// The virtual monitor was changed from outside the daemon. With `follow_system_changes`
+    /// the new size, position or removal becomes a patch that goes through the same path as
+    /// `ctl set`; without it the difference is only logged.
+    fn follow_display(&mut self, event: DisplayEvent) {
+        let span = info_span!("display");
+        let _guard = span.enter();
+        if self.live.mode != DisplayMode::Extend {
+            return;
+        }
+        if !self.live.follow_system_changes {
+            warn!(?event, "the virtual monitor changed outside the daemon; follow_system_changes is off, so the daemon keeps its own layout");
+            return;
+        }
+        let patch = match event {
+            DisplayEvent::Removed => SettingsPatch {
+                mode: Some(DisplayMode::Mirror),
+                ..SettingsPatch::default()
+            },
+            DisplayEvent::Changed {
+                rect,
+                resized,
+                moved,
+            } => {
+                self.pipeline.observed(rect);
+                let orientation = if rect.height > rect.width {
+                    Orientation::Portrait
+                } else {
+                    Orientation::Landscape
+                };
+                SettingsPatch {
+                    width: resized.then_some(rect.width),
+                    height: resized.then_some(rect.height),
+                    orientation: resized.then_some(orientation),
+                    placement: moved.then_some(Placement::At),
+                    x: moved.then_some(rect.x),
+                    y: moved.then_some(rect.y),
+                    ..SettingsPatch::default()
+                }
+            }
+        };
+        info!(?event, "following a change made to the virtual monitor");
+        match self.apply(&patch) {
+            ControlResponse::Applied { class, changed } => {
+                info!(class, changed = ?changed, "followed the change");
+            }
+            ControlResponse::Invalid { reason } => {
+                warn!(%reason, "the change cannot be followed; putting the monitor back");
+                if let Err(error) = self.pipeline.resync(&self.live) {
+                    warn!(%error, "could not put the monitor back");
+                }
+            }
+            other => warn!(?other, "the change was not followed"),
         }
     }
 
@@ -827,5 +890,160 @@ mod tests {
                 key.name()
             );
         }
+    }
+
+    /// A pipeline that takes every step and records what it was told about the monitor.
+    struct Monitored {
+        applied: Applied,
+        observed: Arc<Mutex<Vec<crate::ports::display::Rect>>>,
+        resyncs: Arc<Mutex<u32>>,
+    }
+
+    impl PipelineHandle for Monitored {
+        fn supported(&self) -> Vec<ReconfigAction> {
+            vec![
+                ReconfigAction::SetFollow,
+                ReconfigAction::DestroyMonitor,
+                ReconfigAction::CreateMonitor,
+                ReconfigAction::RecreateMonitor,
+                ReconfigAction::ResizeMonitor,
+                ReconfigAction::RebuildEncoder,
+                ReconfigAction::RetargetCapture,
+                ReconfigAction::RunDockCycle,
+            ]
+        }
+        fn options(&self) -> PlanOptions {
+            PlanOptions { live_rate: true }
+        }
+        fn apply(&mut self, plan: &ReconfigPlan, _settings: &LiveSettings) -> Result<(), String> {
+            self.applied.lock().unwrap().push(plan.actions().to_vec());
+            Ok(())
+        }
+        fn resync(&mut self, _settings: &LiveSettings) -> Result<(), String> {
+            *self.resyncs.lock().unwrap() += 1;
+            Ok(())
+        }
+        fn observed(&mut self, rect: crate::ports::display::Rect) {
+            self.observed.lock().unwrap().push(rect);
+        }
+    }
+
+    struct Following {
+        supervisor: Supervisor,
+        applied: Applied,
+        observed: Arc<Mutex<Vec<crate::ports::display::Rect>>>,
+        resyncs: Arc<Mutex<u32>>,
+    }
+
+    fn following(mode: DisplayMode, follow: bool) -> Following {
+        let mut live = shipped();
+        live.mode = mode;
+        live.follow_system_changes = follow;
+        let applied = Applied::default();
+        let observed = Arc::default();
+        let resyncs = Arc::default();
+        let pipeline = Monitored {
+            applied: Arc::clone(&applied),
+            observed: Arc::clone(&observed),
+            resyncs: Arc::clone(&resyncs),
+        };
+        let supervisor =
+            Supervisor::new(live, Box::new(|| Err("no file".into())), Box::new(pipeline));
+        Following {
+            supervisor,
+            applied,
+            observed,
+            resyncs,
+        }
+    }
+
+    fn changed(x: i32, y: i32, width: u32, height: u32, resized: bool, moved: bool) -> Command {
+        Command::Display(DisplayEvent::Changed {
+            rect: crate::ports::display::Rect::new(x, y, width, height),
+            resized,
+            moved,
+        })
+    }
+
+    #[test]
+    fn a_monitor_resized_from_outside_changes_the_size_through_a_dock_cycle() {
+        let mut f = following(DisplayMode::Extend, true);
+        f.supervisor
+            .handle(changed(1280, 0, 1600, 900, true, false));
+        assert_eq!(f.supervisor.settings().geometry.width().0, 1600);
+        assert_eq!(f.supervisor.settings().geometry.height().0, 900);
+        let applied = f.applied.lock().unwrap();
+        assert_eq!(applied.len(), 1, "one change, one transaction");
+        assert!(applied[0].contains(&ReconfigAction::RunDockCycle));
+        assert_eq!(f.observed.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_monitor_rotated_from_outside_becomes_a_portrait_picture() {
+        let mut f = following(DisplayMode::Extend, true);
+        f.supervisor
+            .handle(changed(1280, 0, 720, 1280, true, false));
+        let geometry = &f.supervisor.settings().geometry;
+        assert_eq!((geometry.width().0, geometry.height().0), (720, 1280));
+    }
+
+    #[test]
+    fn a_monitor_moved_from_outside_retargets_capture_without_a_dock_cycle() {
+        let mut f = following(DisplayMode::Extend, true);
+        f.supervisor.handle(changed(0, 720, 1280, 720, false, true));
+        let settings = f.supervisor.settings();
+        assert_eq!(settings.placement, Placement::At);
+        assert_eq!((settings.x, settings.y), (0, 720));
+        let applied = f.applied.lock().unwrap();
+        assert_eq!(applied.len(), 1);
+        assert!(!applied[0].contains(&ReconfigAction::RunDockCycle));
+        assert!(applied[0].contains(&ReconfigAction::RetargetCapture));
+    }
+
+    #[test]
+    fn a_removed_monitor_reverts_to_mirror() {
+        let mut f = following(DisplayMode::Extend, true);
+        f.supervisor.handle(Command::Display(DisplayEvent::Removed));
+        assert_eq!(f.supervisor.settings().mode, DisplayMode::Mirror);
+        assert_eq!(f.applied.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn changes_from_outside_are_ignored_when_following_is_off() {
+        let mut f = following(DisplayMode::Extend, false);
+        f.supervisor
+            .handle(changed(1280, 0, 1600, 900, true, false));
+        f.supervisor.handle(Command::Display(DisplayEvent::Removed));
+        assert_eq!(f.supervisor.settings().geometry.width().0, 1280);
+        assert_eq!(f.supervisor.settings().mode, DisplayMode::Extend);
+        assert!(f.applied.lock().unwrap().is_empty());
+        assert!(f.observed.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn changes_from_outside_are_ignored_in_mirror_mode() {
+        let mut f = following(DisplayMode::Mirror, true);
+        f.supervisor
+            .handle(changed(1280, 0, 1600, 900, true, false));
+        assert!(f.applied.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_size_that_is_not_valid_is_refused_and_the_monitor_is_put_back() {
+        let mut f = following(DisplayMode::Extend, true);
+        f.supervisor
+            .handle(changed(1280, 0, 1601, 901, true, false));
+        assert_eq!(f.supervisor.settings().geometry.width().0, 1280);
+        assert!(f.applied.lock().unwrap().is_empty());
+        assert_eq!(*f.resyncs.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn shutdown_ends_the_serving_loop() {
+        let f = following(DisplayMode::Extend, true);
+        let (tx, rx) = mpsc::channel();
+        tx.send(Command::Shutdown).unwrap();
+        f.supervisor.run(&rx);
+        drop(tx);
     }
 }

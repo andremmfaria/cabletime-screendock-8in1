@@ -4,8 +4,9 @@
 //! The display policy in `core::display_policy` reads these facts; adapters gather them.
 
 pub use super::types::{
-    DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, MonitorName, MonitorSpec,
-    OutputFacts, OutputId, Rect, VdisplayError, VirtualDisplay, VirtualMonitor, X11Tier,
+    DisplayEvent, DisplayEventSink, DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend,
+    MonitorName, MonitorSpec, OutputFacts, OutputId, Rect, VdisplayError, VirtualDisplay,
+    VirtualMonitor, X11Tier,
 };
 
 /// The name used when none is given.

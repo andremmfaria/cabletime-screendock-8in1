@@ -1,3 +1,4 @@
+mod follow_x11;
 #[path = "../support/mod.rs"]
 mod support;
 #[cfg(feature = "capture-wayland")]

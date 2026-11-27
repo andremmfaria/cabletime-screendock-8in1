@@ -11,6 +11,7 @@ mod randr;
 mod recovery;
 pub mod sway_ipc;
 pub mod types;
+pub mod watch;
 mod wlroots;
 mod x11_randr;
 
@@ -27,6 +28,7 @@ pub use self::recovery::recover;
 pub use self::sway_ipc::sway_output_facts;
 #[cfg(feature = "capture-wayland")]
 pub use self::types::AshpdPortalSource;
+pub use self::types::{ExpectedRect, MonitorWatcher, RectSource, WatchTarget, WATCH_DEBOUNCE};
 pub use self::types::{
     PortalMonitor, PortalRequest, PortalSource, PortalStream, PortalVirtualDisplay, TokenStore,
     DEFAULT_PORTAL_TIMEOUT,

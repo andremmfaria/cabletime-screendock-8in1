@@ -347,7 +347,30 @@ pub enum Command {
     },
     /// Re-read the config file (SIGHUP). No answer is sent.
     Reload,
+    /// The virtual monitor was changed from outside the daemon, for example in the desktop's
+    /// display settings. No answer is sent.
+    Display(DisplayEvent),
+    /// Stop serving commands and return.
+    Shutdown,
 }
+
+/// What a watcher saw happen to the virtual monitor that the daemon did not do itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayEvent {
+    /// The monitor is somewhere else or has another size. `rect` is where it is now.
+    Changed {
+        rect: Rect,
+        /// The width or height differs from what the daemon expects.
+        resized: bool,
+        /// The position differs from what the daemon expects.
+        moved: bool,
+    },
+    /// The monitor no longer exists.
+    Removed,
+}
+
+/// Where a watcher reports what it saw.
+pub type DisplayEventSink = Box<dyn Fn(DisplayEvent) + Send + 'static>;
 
 /// Errors from the control socket, on the server and the client side.
 #[derive(Debug, Error)]
@@ -454,6 +477,15 @@ pub trait VirtualMonitor: Send {
     fn pipewire_node(&self) -> Option<u32> {
         None
     }
+
+    /// Starts reporting changes made to the monitor from outside the daemon to `notify`. The
+    /// default reports nothing.
+    fn follow(&mut self, _notify: DisplayEventSink) {}
+
+    /// Records that the monitor is now at `rect` because something outside the daemon put it
+    /// there, so the daemon does not change it back or report it again. The default does
+    /// nothing.
+    fn observe(&mut self, _rect: Rect) {}
 }
 
 /// One way of making virtual monitors.
