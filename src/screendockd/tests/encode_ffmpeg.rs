@@ -27,6 +27,9 @@ fn settings(width: u32, height: u32, orientation: Orientation) -> EncoderSetting
         fps: 25,
         keyframe_interval: KEYFRAME_INTERVAL,
         bitrate_kbps: 1500,
+        preset: screendockd::utils::config::X264Preset::Ultrafast,
+        zerolatency: true,
+        vbv_buffer_ms: 200,
     }
 }
 

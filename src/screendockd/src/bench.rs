@@ -78,6 +78,47 @@ pub struct BenchReport {
     pub capture_wall: Duration,
     /// Wall time spent inside `encode`.
     pub encode_wall: Duration,
+    /// Bytes of each frame's messages, in order.
+    pub frame_bytes: Vec<u64>,
+    /// Bytes of each keyframe message, in order.
+    pub keyframe_bytes: Vec<u64>,
+    /// Bytes of each non-keyframe message, in order.
+    pub inter_bytes: Vec<u64>,
+}
+
+/// Summary of a list of sizes in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SizeStats {
+    pub count: usize,
+    pub min: u64,
+    pub median: u64,
+    pub p95: u64,
+    pub max: u64,
+}
+
+impl SizeStats {
+    pub fn of(sizes: &[u64]) -> Option<Self> {
+        if sizes.is_empty() {
+            return None;
+        }
+        let mut sorted = sizes.to_vec();
+        sorted.sort_unstable();
+        let at = |q: f64| sorted[((sorted.len() - 1) as f64 * q).round() as usize];
+        Some(Self {
+            count: sorted.len(),
+            min: sorted[0],
+            median: at(0.5),
+            p95: at(0.95),
+            max: sorted[sorted.len() - 1],
+        })
+    }
+}
+
+/// HID reports needed for a message of `bytes` bytes (4080 payload bytes per report).
+pub fn reports_for(bytes: u64) -> u64 {
+    bytes
+        .div_ceil(crate::framing::FIRST_CHUNK_PAYLOAD_MAX as u64)
+        .max(1)
 }
 
 impl BenchReport {
@@ -117,12 +158,33 @@ impl fmt::Display for BenchReport {
             self.cpu.system.as_secs_f64(),
             self.cpu_percent_of_one_core()
         )?;
-        write!(
+        writeln!(
             f,
             "wall in capture: {:.3} s, wall in encode: {:.3} s",
             self.capture_wall.as_secs_f64(),
             self.encode_wall.as_secs_f64()
-        )
+        )?;
+        writeln!(
+            f,
+            "bit rate: {:.0} kbit/s over the measured wall time",
+            self.encoded_bytes as f64 * 8.0 / 1000.0 / self.wall.as_secs_f64().max(f64::EPSILON)
+        )?;
+        let line = |f: &mut fmt::Formatter<'_>, label: &str, s: Option<SizeStats>| match s {
+            Some(s) => writeln!(
+                f,
+                "{label}: n={} min={} median={} p95={} max={} bytes (max = {} reports)",
+                s.count,
+                s.min,
+                s.median,
+                s.p95,
+                s.max,
+                reports_for(s.max)
+            ),
+            None => writeln!(f, "{label}: none"),
+        };
+        line(f, "keyframe size", SizeStats::of(&self.keyframe_bytes))?;
+        line(f, "inter frame size", SizeStats::of(&self.inter_bytes))?;
+        line(f, "all frames size", SizeStats::of(&self.frame_bytes))
     }
 }
 
@@ -145,6 +207,9 @@ pub fn run_bench(
         cpu: CpuTimes::default(),
         capture_wall: Duration::ZERO,
         encode_wall: Duration::ZERO,
+        frame_bytes: Vec::new(),
+        keyframe_bytes: Vec::new(),
+        inter_bytes: Vec::new(),
     };
     while start.elapsed() < duration && !stop.load(Ordering::Relaxed) {
         let t = Instant::now();
@@ -157,10 +222,17 @@ pub fn run_bench(
 
         report.frames += 1;
         report.messages += messages.len() as u64;
-        report.encoded_bytes += messages
-            .iter()
-            .map(|m| m.as_bytes().len() as u64)
-            .sum::<u64>();
+        let bytes: u64 = messages.iter().map(|m| m.as_bytes().len() as u64).sum();
+        report.encoded_bytes += bytes;
+        report.frame_bytes.push(bytes);
+        for m in &messages {
+            let len = m.as_bytes().len() as u64;
+            if m.is_keyframe() {
+                report.keyframe_bytes.push(len);
+            } else {
+                report.inter_bytes.push(len);
+            }
+        }
     }
     report.wall = start.elapsed();
     report.cpu = process_cpu_times()?.since(&cpu_start);
@@ -193,6 +265,9 @@ mod tests {
             fps: 25,
             keyframe_interval: 2,
             bitrate_kbps: 1000,
+            preset: crate::utils::config::X264Preset::Ultrafast,
+            zerolatency: true,
+            vbv_buffer_ms: 200,
         };
         let mut encoder = PrerecordedEncoder::new(
             vec![vec![0, 0, 0, 1, 0x65, 1, 2, 3], vec![0, 0, 0, 1, 0x41, 4]],
@@ -221,9 +296,22 @@ mod tests {
             cpu: CpuTimes::default(),
             capture_wall: Duration::ZERO,
             encode_wall: Duration::ZERO,
+            frame_bytes: Vec::new(),
+            keyframe_bytes: Vec::new(),
+            inter_bytes: Vec::new(),
         };
         assert_eq!(report.cpu_percent_of_one_core(), 0.0);
         assert_eq!(report.fps(), 0.0);
+    }
+
+    #[test]
+    fn size_stats_and_report_counts() {
+        let stats = SizeStats::of(&[10, 40, 20, 30, 50]).unwrap();
+        assert_eq!((stats.min, stats.median, stats.max), (10, 30, 50));
+        assert!(SizeStats::of(&[]).is_none());
+        assert_eq!(reports_for(1), 1);
+        assert_eq!(reports_for(4080), 1);
+        assert_eq!(reports_for(4081), 2);
     }
 
     #[test]
