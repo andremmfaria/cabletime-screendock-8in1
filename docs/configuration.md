@@ -24,7 +24,7 @@ The command line option `--config PATH` bypasses this order and loads that file 
 | `capture.x11_display` | string | unset | X11 display to capture, for example `:0`. Unset uses `$DISPLAY` |
 | `capture.fps` | integer | 25 | Capture frame rate. 0 captures as fast as the backend allows |
 | `daemon.log_level` | string | `info` | Default log filter: `trace`, `debug`, `info`, `warn` or `error` |
-| `daemon.heartbeat_interval_ms` | integer | 1000 | Heartbeat tick interval in milliseconds |
+| `daemon.heartbeat_interval_ms` | integer | 1000 | Heartbeat interval in milliseconds |
 | `device.vendor_id_hex` | string | `1de1` | USB vendor ID that discovery matches. Four hex digits, optional `0x` |
 | `device.product_id_hex` | string | `f201` | USB product ID that discovery matches. Four hex digits, optional `0x` |
 

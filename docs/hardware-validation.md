@@ -91,6 +91,17 @@ The result to derive from the three records: whether video renders without the h
 
 A written observation for all three conditions, not only (c).
 
+## Session handshake on a fresh dock
+
+Goal: confirm that `screendockd run` brings up the panel from a freshly plugged dock without any other host software. Unplug and replug the dock, wait for it to settle, then run `RUST_LOG=debug screendockd run --h264-file test.h264`. Record:
+
+- The log sequence: the state changes (`WaitingForReady`, `AppLaunchedSent`, `ProjectionStartedSent`, `Settling`), the `session armed` line with the armed state (`Active` or `AssumedActive`), and any `handshake failed`, `session lost` or `no answer from the dock` warnings.
+- The time from process start to the first picture on the panel.
+- The same run again without replugging (the dock then holds the session from the first run): the expected log is `AssumedActive` after the 3 second ready wait.
+- Whether the picture survives stopping and restarting the process, and unplugging and replugging while `run` is active.
+
+Status: requires on-device validation of the Rust implementation. See the verified facts at the top of this page for what the Python prototype showed.
+
 ## M5: CPU cost of capture plus encode
 
 Goal: record the sustained CPU use of screen capture plus libx264 encoding at 25 fps and 1280x720. No dock is needed. Needs a build with `--features encode-ffmpeg` and an interactive session on the target host.
