@@ -34,7 +34,7 @@ The default build (only `tools`) captures X11, replays prerecorded H.264 files a
 
 ## Install from a package
 
-Each tagged release has a `.deb` and an `.rpm` attached on the [releases page](https://github.com/andremmfaria/cabletime-screendock-8in1/releases). The packages are built with `encode-ffmpeg`.
+Each tagged release has a `.deb` and an `.rpm` attached on the [releases page](https://github.com/andremmfaria/cabletime-screendock-8in1/releases). The packages are built with `encode-ffmpeg` and `capture-wayland`.
 
 ```text
 sudo apt install ./screendockd_<version>_amd64.deb

@@ -311,3 +311,17 @@ screendockd run --mi00 /tmp/mi00 --mi01 /tmp/mi01 --h264-file test.h264 --max-fr
 ```
 
 Regular files cannot hold the dock's side of the handshake, so dry runs need `--no-handshake`. The tools print a note when a node is not a character device. Timings from such runs are not hardware timings.
+
+## Not verified on real hardware
+
+These behaviours have only been exercised on the headless setups described above, or not at all, and each needs a run on the real target before it is relied on:
+
+- The portal virtual source on any desktop: headless GNOME Shell reports no source types, so only the mocked portal tests cover it.
+- GNOME on a real GPU session: lock screen, suspend and resume, the Settings display page listing the monitor, real buffer negotiation, and a size change made from Settings.
+- KDE Plasma, and sway on hardware.
+- Xorg `modesetting` on the i915 driver: only the dummy driver was started rootless, so the real output tier on a physical GPU driver is untested.
+- A desktop settings page listing a bare X11 monitor.
+- The size change through the desktop's own settings with the real dock: the follow path is tested with `xrandr` and `swaymsg` against the simulated dock.
+- Panel appearance for any size, including the black flash on a dock cycle, which only a person looking at the panel can judge.
+- The full gate runs on a CI runner for the Xorg, sway and GNOME Shell tests: they skip where the runner cannot start the server.
+

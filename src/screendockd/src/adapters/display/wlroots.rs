@@ -116,13 +116,6 @@ impl VirtualDisplay for WlrootsHeadlessDisplay {
     }
 }
 
-impl WlrootsMonitor {
-    /// The sway name of the output, for example `HEADLESS-2`.
-    pub fn output_name(&self) -> &str {
-        &self.name
-    }
-}
-
 impl VirtualMonitor for WlrootsMonitor {
     fn rect(&self) -> Rect {
         self.rect

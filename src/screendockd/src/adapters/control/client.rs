@@ -3,7 +3,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::types::{UnixControlClient, CLIENT_REPLY_TIMEOUT};
 use crate::ports::control::{ControlClient, ControlError};
@@ -16,12 +15,6 @@ impl UnixControlClient {
             path: path.to_path_buf(),
             timeout: CLIENT_REPLY_TIMEOUT,
         }
-    }
-
-    /// The same client with a different answer timeout.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
     }
 
     /// The socket path.

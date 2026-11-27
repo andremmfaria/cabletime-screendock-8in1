@@ -8,6 +8,7 @@
 //! which the monitor owns.
 
 use std::sync::Arc;
+#[cfg(not(feature = "capture-wayland"))]
 use std::time::Duration;
 
 pub use super::types::{
@@ -21,12 +22,6 @@ impl MutterVirtualDisplay {
             connector,
             timeout: DEFAULT_MUTTER_TIMEOUT,
         }
-    }
-
-    /// Sets how long Mutter gets to announce the PipeWire node.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
-        self
     }
 }
 
@@ -276,6 +271,7 @@ mod zbus_calls {
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::time::Duration;
 
     use super::*;
     use crate::ports::display::{MonitorName, Rect};

@@ -28,6 +28,29 @@ Every directory under `src/` except the crate root has a `types.rs` with its dec
 
 The checks that run before every change, from `src/screendockd`: `cargo fmt --check`; `cargo clippy --all-targets -- -D warnings` with the default features, with `--no-default-features`, with `--features encode-ffmpeg`, with `--features capture-wayland` and with `--features encode-ffmpeg,capture-wayland`; `cargo test` and `cargo test --features encode-ffmpeg,capture-wayland` with the five variables above set; `cargo build --no-default-features`; `cargo build --release --features encode-ffmpeg,capture-wayland`. The layer rules in [architecture.md](architecture.md#layering-rules) are checked with a search for forbidden `crate::` imports in each layer; the only matches are the `#[cfg(test)]` imports of the adapters in `tools`.
 
+## Test evidence by feature
+
+What each feature rests on, as the tests that exercise it. Test names are given in short form; every one is in the file named.
+
+| Feature | Evidence |
+|---|---|
+| Live settings | `core/reconfig/plan.rs` tests give the class and actions of every row of the change table, including combined changes. `tests/session/reconfig.rs`: `live_bitrate_and_keyframe_interval_changes_need_no_new_handshake`, `fps_and_preset_changes_rebuild_the_encoder_without_a_dock_cycle`. `app/supervisor.rs` tests cover `live_change_is_applied_reported_and_visible_in_get` and the invalid, rejected and unchanged cases. |
+| Reload | `app/supervisor.rs`: `reload_applies_only_the_differences_to_the_live_settings`, `reload_with_an_unsupported_difference_applies_nothing`, `signal_reload_takes_the_same_path_without_a_reply`. `tests/e2e/control_socket.rs`: `sighup_and_ctl_reload_apply_the_config_file_differences`. |
+| Control socket | `tests/e2e/control_socket.rs` (`ctl_reports_the_running_daemons_settings_and_the_socket_is_private`, `ctl_set_applies_live_changes_and_rejects_what_the_pipeline_cannot_do`, `ctl_without_a_daemon_exits_with_code_3`, `disabled_control_socket_is_not_created`) and `tests/protocol/control_wire.rs`. |
+| Dock cycle and resolution changes | `tests/session/reconfig.rs`: `renegotiation_runs_stop_launch_at_the_new_size_and_start_in_order`, `size_change_rebuilds_the_encoder_and_runs_the_dock_cycle_with_video_at_the_new_size`, `video_headers_follow_the_new_size_and_none_is_written_while_the_cycle_runs`, `portrait_size_is_accepted_as_a_dock_cycle_with_swapped_headers`, `commands_sent_during_a_cycle_are_queued_and_served_in_order`. |
+| Rollback and degraded state | `tests/session/reconfig.rs`: `a_size_the_dock_refuses_leaves_the_old_encoder_and_size_running`, `a_dock_that_loses_the_session_after_the_cycle_is_rolled_back_to_the_last_good_size`, `a_rollback_that_fails_leaves_the_daemon_degraded_until_the_next_command_recovers_it`. `core/reconfig/transaction.rs`: `a_failed_commit_restores_the_previous_settings`, `a_failed_verify_restores_the_previous_settings`, `a_committed_change_dropped_unverified_is_rolled_back`. `app/supervisor.rs`: `a_failed_rollback_degrades_the_daemon_and_the_next_command_resyncs_first`. |
+| EDID | `tests/protocol/edid.rs`: `dock_edid_parses_to_its_name_native_mode_and_mode_list`, `trailing_bytes_after_the_declared_blocks_are_ignored`, `truncated_input_is_an_error_at_every_length`, `names_are_reduced_to_printable_ascii_without_path_separators`, `arbitrary_bytes_behind_a_valid_header_never_panic`. The daemon tests with the simulated dock cover the cache and the synthetic fallback. |
+| X11 virtual monitor | `tests/capture/virtual_x11.rs`: `bare_monitor_is_listed_captured_exactly_and_removed_on_drop`, `output_monitor_is_a_real_output_captured_exactly_and_removed_on_drop`, `an_output_the_server_refuses_falls_back_to_a_bare_monitor`, `resizing_changes_the_monitor_on_the_server_in_both_tiers`, `recovery_removes_a_monitor_that_a_killed_daemon_left_behind`. `tests/e2e/vdisplay_xorg.rs`: `ctl_switches_between_mirror_and_extend_and_exit_restores_the_layout`, `a_monitor_left_by_a_killed_daemon_is_removed_by_vdisplay_cleanup`, `a_new_daemon_undoes_the_monitor_a_killed_one_left_behind`, `vdisplay_probe_prints_the_outputs_and_the_extend_mechanism`. |
+| Mode switching | The X11 tests above, `tests/capture/virtual_sway.rs` (`switching_the_mode_creates_the_output_right_of_the_anchor_and_removes_it_again`), `tests/capture/virtual_mutter.rs` (`switching_the_mode_creates_the_stream_monitor_and_removes_it_again`) and `app/monitor.rs` (`switching_to_extend_creates_the_monitor_right_of_the_anchor_and_back_removes_it`). With the section absent the mode is mirror (configuration tests). |
+| Display policy | `core/display_policy.rs`: `gnome_picks_mutter_even_when_the_portal_offers_nothing`, `sway_picks_the_wlroots_headless_output`, `other_wayland_compositors_use_the_portal_only_when_it_offers_a_virtual_source`, `x11_without_randr_monitors_falls_back_to_mirror_with_a_reason`, `fail_policy_turns_a_missing_mechanism_into_an_error`, the placement tests. |
+| Following display changes | `tests/capture/follow_x11.rs` (the watcher reports resize, move and removal made with `xrandr`, and nothing for the daemon's own changes). `tests/e2e/follow_xorg.rs`: `an_xrandr_mode_change_runs_one_dock_cycle_with_a_rebuilt_encoder_and_a_new_keyframe`, `a_size_set_with_ctl_runs_one_dock_cycle_and_the_echo_is_not_followed`, `with_following_off_an_xrandr_mode_change_leaves_the_dock_alone`, `turning_the_monitor_off_with_xrandr_reverts_the_daemon_to_mirror`. `tests/e2e/follow_sway.rs` has the same set for `swaymsg` plus `a_swaymsg_position_change_retargets_capture_without_a_dock_cycle`. `app/supervisor.rs`: `a_monitor_resized_from_outside_changes_the_size_through_a_dock_cycle`, `a_monitor_moved_from_outside_retargets_capture_without_a_dock_cycle`, `a_removed_monitor_reverts_to_mirror`. |
+| sway headless | `tests/capture/virtual_sway.rs`: `headless_output_is_created_at_the_requested_rectangle_and_unplugged_on_drop`, `headless_output_holds_the_pixels_a_second_client_reads_at_every_size`, `resizing_the_headless_output_changes_size_and_position`, `several_headless_monitors_are_independent`. |
+| Mutter | `tests/capture/virtual_mutter.rs`: `mutter_monitor_streams_frames_at_the_requested_size`, `mutter_stream_takes_the_size_the_capture_asks_for`, `retargeting_to_another_stream_switches_the_frames`, `mutter_stream_node_is_removed_when_the_monitor_drops`. The call sequence is covered without a shell by the `mutter_mock_*` tests in `adapters/display/mutter.rs`. |
+| Portal virtual source | Mocked portal tests in `adapters/display/portal.rs`: `a_portal_that_does_not_answer_in_time_is_unsupported_and_its_late_stream_is_closed`, `restore_token_is_presented_again_and_replaced_after_a_start`, `dropping_the_monitor_closes_the_portal_session`. |
+| Packages | `deploy/check-packages.sh` in the package workflow: payload files and modes, the PipeWire dependency in both packages, the unit lines and a start of the extracted binary. |
+
+The display, Mutter and sway live tests need the matching `SCREENDOCK_REQUIRE_*` variable to fail instead of skip; the gate set above runs them with all five set.
+
 ## Default checks
 
 ```text
@@ -139,6 +162,43 @@ Status: this feature does not compile on hosts without the libav development fil
 ## Daemon
 
 `tests/e2e/daemon_xvfb.rs` runs the real `screendockd run --no-handshake` binary against Xvfb with the prerecorded encoder and regular files for MI_00 and MI_01 (files cannot hold a dock conversation), and checks the written video messages against the source stream, the heartbeat, graceful exit on SIGTERM and SIGINT, and fail-fast startup. Unit tests in `src/app/daemon.rs` cover the error policy with synthetic backends and loopback files. These tests need Xvfb on the same terms as the capture tests (`SCREENDOCK_REQUIRE_XVFB`). See [daemon.md](daemon.md#tests).
+
+## Picture size comparison
+
+`deploy/compare_sizes.sh` measures how close the picture the daemon sends is to the screen it captured, for several picture sizes, without a dock. It needs `Xvfb`, `xterm`, `ffmpeg` with `x11grab`, `ffprobe` and `python3`, and a binary built with `--features encode-ffmpeg`.
+
+```text
+deploy/compare_sizes.sh [size ...]
+```
+
+The default sizes are `1280x720`, `900x720` and `640x360`. Environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SCREENDOCKD` | `src/screendockd/target/release/screendockd` | The binary to run |
+| `COMPARE_DISPLAY` | `150` | Display number of the private Xvfb; the script refuses a number that is in use |
+| `COMPARE_SECONDS` | `6` | Seconds the daemon runs before the screenshot is taken |
+
+The script starts its own Xvfb (1280x720) with an `xterm` that prints a fixed text pattern, and stops both on exit. For each size it writes a config with that `display.width` and `display.height`, starts a fresh `screendockd run --backend x11 --no-handshake` against two regular files standing in for the MI_00 and MI_01 nodes, and lets it run. It then grabs one frame of the display with `ffmpeg` (`x11grab`) as a PNG and stops the daemon. A size is set through the config because `ctl set resolution` needs a session, and `--no-handshake` has none.
+
+It then reads the MI_01 file back: every report has a 16 byte header, bytes 1 to 4 of the first report hold the payload length as a big-endian u32, and each report carries up to 4080 payload bytes. The first message with an IDR slice at or after message 40 (the keyframe interval is 50 frames) is written as an Annex B file, decoded with `ffmpeg` to a PNG, and compared with the screenshot scaled to the decoded size, using the `psnr` and `ssim` filters. The script prints one row per size:
+
+```text
+size       decoded    PSNR dB    SSIM
+1280x720   1280x720   17.700141  0.591896
+900x720    900x720    19.726888  0.510269
+640x360    640x360    24.103294  0.948752
+```
+
+What the numbers mean:
+
+- `decoded` is the size of the decoded frame; it equals the configured size when the header, the encoder and the framing agree.
+- PSNR is the average peak signal to noise ratio over the three colour channels in decibels, higher is closer. SSIM is structural similarity from 0 to 1, 1 is identical.
+- The comparison covers capture, scaling to the encoded size, libx264 at the configured bit rate and the decode. It does not include anything the panel does after it receives the stream, so it says nothing about the panel itself.
+- Text on a black background is the hardest content for a lossy encoder at the default `ultrafast` preset and `encode.vbv_buffer_ms` of 100, so the absolute values are low; compare sizes with each other and runs with the same settings, not with a fixed threshold.
+- The source screenshot is taken after the keyframe was produced, and the xterm content is static, so differences come from encoding and scaling, not from content changes. A sized-down picture compares against a scaled screenshot, so SSIM at a size whose aspect ratio differs from 16:9 (900x720) includes the stretch of that scaling.
+
+The script never opens `/dev/hidraw*` and uses only the display number it was given.
 
 ## CPU measurement
 

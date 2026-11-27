@@ -1,11 +1,12 @@
 # screendockd documentation
 
-Documentation for `screendockd`, an independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, USB 1de1:f201). It is not affiliated with or endorsed by CableTime. These pages describe the current state of the project; `implementation-plan.md` and `research/` are the planning and research record.
+Documentation for `screendockd`, an independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, USB 1de1:f201). It is not affiliated with or endorsed by CableTime. These pages describe the current state of the project; `research/` holds the protocol research.
 
 ## Project pages
 
 | Page | Contents |
 |---|---|
+| [design.md](design.md) | What the project is, scope, the design patterns the code follows, technology, validation status and known limits |
 | [architecture.md](architecture.md) | Modules, data flow, and implementation status of each one |
 | [protocol-implementation.md](protocol-implementation.md) | How the wire protocol is implemented: framing, hidraw I/O, heartbeat, session handshake, Annex-B splitting |
 | [configuration.md](configuration.md) | Config file resolution, fields, command line, environment variables |
@@ -28,5 +29,4 @@ Documentation for `screendockd`, an independent, unofficial Linux userspace driv
 | [security-assessment.md](security-assessment.md) | Security assessment of the vendor software |
 | [reviews-and-caveats.md](reviews-and-caveats.md) | Reviews and caveats |
 | [sources.md](sources.md) | Sources |
-| [implementation-plan.md](implementation-plan.md) | Implementation plan |
 | [research/](research/) | Protocol research, including the full protocol specification |

@@ -206,11 +206,6 @@ impl FakeDock {
         self.inner.lock().rejected_size = Some((size.width.0, size.height.0));
     }
 
-    /// Accepts every size again.
-    pub fn accept_all_sizes(&self) {
-        self.inner.lock().rejected_size = None;
-    }
-
     /// The size named by every `app-launched` request so far, in order.
     pub fn launch_sizes(&self) -> Vec<(u32, u32)> {
         self.inner.lock().launch_sizes.clone()
