@@ -36,6 +36,9 @@ const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(40);
 /// Pause between checks while the session is not armed.
 const UNARMED_POLL: Duration = Duration::from_millis(20);
 
+/// Consecutive failed video writes after which the session is told to redo the handshake.
+const WRITE_FAILURES_BEFORE_REHANDSHAKE: u32 = 3;
+
 /// How often the loop logs a progress line.
 const STATS_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -156,6 +159,7 @@ fn video_loop(
     info!("video loop started");
 
     let mut consecutive: u32 = 0;
+    let mut write_failures: u32 = 0;
     let mut generation = 0u64;
     let mut last_stats = Instant::now();
     let fail = |consecutive: &mut u32, what: String| -> Result<(), DaemonError> {
@@ -218,6 +222,7 @@ fn video_loop(
                 .build();
             match mi01.write_chunks(&chunks) {
                 Ok(_) => {
+                    write_failures = 0;
                     report.messages_sent += 1;
                     report.keyframes_sent += u64::from(message.is_keyframe());
                     debug!(
@@ -230,7 +235,11 @@ fn video_loop(
                 Err(e) => {
                     report.write_errors += 1;
                     warn!(error = %e, "video write failed, dropping message");
-                    session.report_failure("video write failed");
+                    write_failures += 1;
+                    if write_failures >= WRITE_FAILURES_BEFORE_REHANDSHAKE {
+                        session.report_failure("video writes keep failing");
+                        write_failures = 0;
+                    }
                     // The panel may now lack a reference frame; restart from a keyframe.
                     encoder.request_keyframe();
                     fail(&mut consecutive, e.to_string())?;

@@ -108,6 +108,7 @@ struct DockState {
     format_violations: u64,
     allowed_sent_at: Option<Instant>,
     video: VideoStats,
+    launch_error: bool,
 }
 
 /// Side effect applied when a scheduled message is sent.
@@ -192,6 +193,7 @@ impl FakeDock {
                 format_violations: 0,
                 allowed_sent_at: None,
                 video: VideoStats::default(),
+                launch_error: false,
             }),
             config,
             stop: AtomicBool::new(false),
@@ -253,6 +255,11 @@ impl FakeDock {
     /// Video statistics (needs `spawn_with_video`).
     pub fn video_stats(&self) -> VideoStats {
         self.inner.lock().video.clone()
+    }
+
+    /// Makes the dock answer `app-launched` with an error object instead of a result.
+    pub fn set_launch_error(&self, on: bool) {
+        self.inner.lock().launch_error = on;
     }
 
     /// The dock loses its session: the sink stops and ready announcements restart.
@@ -340,11 +347,17 @@ fn handle_host_report(
             }
             if let (Some(id), Some(delay)) = (id, inner.config.launch_reply_delay) {
                 let seq = state.seq + 1000;
-                state.scheduled.push((
-                    Instant::now() + delay,
-                    pretty_result(id, r#"{"res-width":1920,"res-height":1080}"#, seq),
-                    SinkEffect::None,
-                ));
+                let reply = if state.launch_error {
+                    format!(
+                        "{{\n\t\"id\":\t{id},\n\t\"error\":\t{{\"code\":-32000}},\n\t\"jrpcSeq\":\t{seq}\n}}"
+                    )
+                    .into_bytes()
+                } else {
+                    pretty_result(id, r#"{"res-width":1920,"res-height":1080}"#, seq)
+                };
+                state
+                    .scheduled
+                    .push((Instant::now() + delay, reply, SinkEffect::None));
             }
             if inner.config.send_edid {
                 state.edid_pending = true;

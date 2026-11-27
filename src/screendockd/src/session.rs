@@ -6,9 +6,12 @@
 //! `notify-projection-started` (a request with an id), and the dock answered `isAllowed`. A
 //! dock that already holds a projection session from an earlier host process answers none of
 //! these requests, yet accepts video. The state machine therefore bounds every wait and falls
-//! back to [`SessionState::AssumedActive`] when the dock is alive (its heartbeats arrive) but
-//! silent. If the dock re-announces `notify-app-accessories-are-ready`, or a heartbeat or video
-//! write fails, the session is lost and the handshake is redone without restarting the process.
+//! back to [`SessionState::AssumedActive`] when the ready announcement or a reply does not
+//! arrive, whether or not the dock sent anything at all (a session-holding dock often echoes no
+//! heartbeat either). Video is never blocked on dock replies. The controller keeps watching in
+//! the armed states: if the dock announces `notify-app-accessories-are-ready` (it holds no
+//! session), or heartbeat or video writes keep failing, the session is lost and the full
+//! handshake is run without restarting the process.
 //!
 //! Threads, all owned by [`Session`]:
 //! - heartbeat: one fixed-deadline writer, independent of video writes (they use MI_01);
@@ -85,9 +88,6 @@ pub enum SessionError {
     /// Writing a control message failed.
     #[error("control write failed: {0}")]
     Write(HidrawIoError),
-    /// The dock sent nothing at all: no ready announcement and no heartbeat.
-    #[error("dock is silent: no ready announcement and no heartbeat within {0:?}")]
-    DockSilent(Duration),
     /// The dock answered a request with an error object.
     #[error("dock rejected {request}: {detail}")]
     Rejected {
@@ -97,12 +97,6 @@ pub enum SessionError {
     /// The dock answered `notify-projection-started` with something other than `isAllowed`.
     #[error("dock denied projection: {0}")]
     Denied(String),
-    /// A request got no answer and the dock's heartbeat was not seen either.
-    #[error("no answer to {request} within {timeout:?} and no dock heartbeat")]
-    NoReply {
-        request: &'static str,
-        timeout: Duration,
-    },
     /// The MI_00 reader stopped (read error or end of stream).
     #[error("MI_00 reader stopped: {0}")]
     ReaderStopped(String),
@@ -610,6 +604,7 @@ impl Session {
                             writer: ctl_writer,
                             events: rx,
                             next_id: 1,
+                            ready_pending: false,
                         };
                         controller.run();
                     })
@@ -777,6 +772,9 @@ struct Controller {
     writer: SharedWriter,
     events: Receiver<DockEvent>,
     next_id: u64,
+    /// A ready announcement the monitor consumed; the next handshake starts from it instead
+    /// of waiting for another one.
+    ready_pending: bool,
 }
 
 impl Controller {
@@ -850,12 +848,8 @@ impl Controller {
         while self.events.try_recv().is_ok() {}
     }
 
-    fn dock_alive(&self) -> bool {
-        self.shared.dock_alive()
-    }
-
-    /// Waits for the reply to request `id`. `None` means the wait timed out but the dock is
-    /// alive, so the caller proceeds as if the dock already held a session.
+    /// Waits for the reply to request `id`. `None` means the wait timed out, so the caller
+    /// proceeds as if the dock already held a session.
     fn wait_reply(&self, request: &'static str, id: u64) -> Result<Option<Value>, HandshakeEnd> {
         let timeout = self.settings.reply_timeout;
         let reply = self.wait_event(timeout, |event| match event {
@@ -876,18 +870,15 @@ impl Controller {
                 }
                 Ok(Some(result.unwrap_or(Value::Null)))
             }
-            Wait::TimedOut if self.dock_alive() => {
+            Wait::TimedOut => {
                 warn!(
                     request,
                     ?timeout,
-                    "no answer from the dock; its heartbeat is alive, assuming it already holds a session"
+                    dock_alive = self.shared.dock_alive(),
+                    "no answer from the dock, assuming it already holds a session"
                 );
                 Ok(None)
             }
-            Wait::TimedOut => Err(HandshakeEnd::Failed(SessionError::NoReply {
-                request,
-                timeout,
-            })),
         }
     }
 
@@ -896,20 +887,20 @@ impl Controller {
         self.drain_events();
         self.shared.set_state(SessionState::WaitingForReady);
         let ready_timeout = self.settings.ready_timeout;
-        let ready = self.wait_event(ready_timeout, |e| {
-            matches!(e, DockEvent::Ready).then_some(())
-        })?;
+        let ready = if std::mem::take(&mut self.ready_pending) {
+            Wait::Got(())
+        } else {
+            self.wait_event(ready_timeout, |e| {
+                matches!(e, DockEvent::Ready).then_some(())
+            })?
+        };
         if matches!(ready, Wait::TimedOut) {
-            if self.dock_alive() {
-                warn!(
-                    ?ready_timeout,
-                    "dock did not announce ready; its heartbeat is alive, assuming it already holds a session"
-                );
-                return Ok(SessionState::AssumedActive);
-            }
-            return Err(HandshakeEnd::Failed(SessionError::DockSilent(
-                ready_timeout,
-            )));
+            warn!(
+                ?ready_timeout,
+                dock_alive = self.shared.dock_alive(),
+                "dock did not announce ready, assuming it already holds a session"
+            );
+            return Ok(SessionState::AssumedActive);
         }
 
         if self.settings.send_stopped {
@@ -977,7 +968,10 @@ impl Controller {
                 return Some("heartbeat writes keep failing".into());
             }
             match self.events.recv_timeout(POLL_SLICE) {
-                Ok(DockEvent::Ready) => return Some("dock re-announced ready".into()),
+                Ok(DockEvent::Ready) => {
+                    self.ready_pending = true;
+                    return Some("dock announced ready".into());
+                }
                 Ok(DockEvent::Reply { .. }) => {}
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return None,
@@ -1227,17 +1221,70 @@ mod tests {
     }
 
     #[test]
-    fn dead_dock_never_arms_and_keeps_retrying() {
+    fn fully_silent_dock_arms_as_assumed_active_and_video_flows() {
+        // No ready, no heartbeat echo, no replies: the dock still renders written video.
         let mut config = FakeDockConfig::holding_session();
         config.heartbeat_interval = None;
-        let (_dock, mi00) = FakeDock::spawn(config);
+        let (dock, mi00, mi01) = FakeDock::spawn_with_video(config);
         let session = Session::start(mi00, fast_settings()).unwrap();
         let handle = session.handle();
-        std::thread::sleep(Duration::from_millis(1200));
-        assert!(!handle.is_armed());
+        wait_for("armed", Duration::from_secs(5), || handle.is_armed());
+        assert_eq!(handle.state(), SessionState::AssumedActive);
+        assert_eq!(handle.generation(), 1);
+
+        let mut mi01 = mi01;
+        let chunks = crate::framing::MessageBuilder::video(size())
+            .payload(&[0xAB; 5000])
+            .build();
+        for _ in 0..3 {
+            mi01.write_chunks(&chunks).unwrap();
+        }
+        wait_for("video seen", Duration::from_secs(3), || {
+            dock.video_stats().messages == 3
+        });
+        let video = dock.video_stats();
+        assert_eq!(video.reports_before_sink, 0);
+        assert_eq!(video.layout_violations, 0);
+        // Heartbeats keep going while the dock stays silent.
+        let non_hb = texts(&dock)
+            .into_iter()
+            .filter(|t| !t.contains("\"heartbeat\""))
+            .count();
+        assert_eq!(non_hb, 0);
         let stats = session.shutdown().unwrap();
-        assert_eq!(stats.handshakes, 0);
+        assert_eq!(stats.handshakes, 1);
         assert_eq!(stats.dock_heartbeats_seen, 0);
+        assert!(stats.heartbeats_sent >= 2);
+    }
+
+    #[test]
+    fn late_ready_after_assumed_active_runs_the_full_handshake() {
+        let mut config = FakeDockConfig::holding_session();
+        config.launch_reply_delay = Some(Duration::from_millis(30));
+        config.started_reply = StartedReply::Allowed;
+        config.send_edid = true;
+        let (dock, mi00) = FakeDock::spawn(config);
+        let session = Session::start(mi00, fast_settings()).unwrap();
+        let handle = session.handle();
+        wait_for("assumed", Duration::from_secs(5), || handle.is_armed());
+        assert_eq!(handle.state(), SessionState::AssumedActive);
+        let generation = handle.generation();
+
+        // The dock loses its session and starts announcing: the handshake must follow at once.
+        dock.drop_session();
+        wait_for("handshake", Duration::from_secs(5), || {
+            handle.generation() > generation && handle.is_armed()
+        });
+        assert_eq!(handle.state(), SessionState::Active);
+        let launches = texts(&dock)
+            .iter()
+            .filter(|t| t.contains("\"app-launched\""))
+            .count();
+        assert_eq!(launches, 1);
+        assert!(dock.sink_started());
+        let stats = session.shutdown().unwrap();
+        assert_eq!(stats.handshakes, 2);
+        assert_eq!(stats.losses, 1);
     }
 
     #[test]
@@ -1253,6 +1300,21 @@ mod tests {
         assert_eq!(handle.generation(), 0);
         // The dock now holds app state and stops announcing, so the retry ends in the
         // bounded fallback rather than blocking video forever.
+        wait_for("fallback", Duration::from_secs(5), || handle.is_armed());
+        assert_eq!(handle.state(), SessionState::AssumedActive);
+        assert_eq!(handle.generation(), 1);
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn error_reply_to_app_launched_fails_the_attempt_and_retries() {
+        let (dock, mi00) = FakeDock::spawn(FakeDockConfig::fresh());
+        dock.set_launch_error(true);
+        let session = Session::start(mi00, fast_settings()).unwrap();
+        let handle = session.handle();
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(!handle.is_armed());
+        assert_eq!(handle.generation(), 0);
         wait_for("fallback", Duration::from_secs(5), || handle.is_armed());
         assert_eq!(handle.state(), SessionState::AssumedActive);
         session.shutdown().unwrap();
