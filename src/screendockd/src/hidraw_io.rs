@@ -60,6 +60,12 @@ pub enum HidrawIoError {
     /// `read(2)` failed.
     #[error("read failed: {0}")]
     Read(io::Error),
+    /// Duplicating the descriptor failed.
+    #[error("couldn't duplicate the hidraw descriptor: {0}")]
+    Clone(io::Error),
+    /// `poll(2)` failed.
+    #[error("poll failed: {0}")]
+    Poll(io::Error),
     /// The read side hit end-of-file (or a zero-length read) before a full message arrived.
     #[error("end of stream while reading chunk {index}")]
     UnexpectedEof { index: usize },
@@ -115,6 +121,47 @@ impl HidrawHandle {
     /// slave). Used by loopback tests and by the validation tools' dry-run paths.
     pub fn from_file(file: File, channel: ReportId) -> Self {
         Self { file, channel }
+    }
+
+    /// Duplicates the descriptor, so a reader thread and a writer can each own a handle to the
+    /// same node. Every message on the control channel is one report, so single `write(2)`
+    /// calls from different handles never interleave inside a message.
+    pub fn try_clone(&self) -> Result<Self, HidrawIoError> {
+        let file = self.file.try_clone().map_err(HidrawIoError::Clone)?;
+        Ok(Self {
+            file,
+            channel: self.channel,
+        })
+    }
+
+    /// Waits up to `timeout` for the node to become readable. Returns true when a read will
+    /// not block (data, end of stream or an error condition is pending), so a reader thread can
+    /// notice a stop request instead of blocking in `read(2)` forever.
+    pub fn wait_readable(&self, timeout: Duration) -> Result<bool, HidrawIoError> {
+        use std::os::fd::AsRawFd;
+        let mut pfd = libc::pollfd {
+            fd: self.file.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let millis = i32::try_from(timeout.as_millis()).unwrap_or(i32::MAX);
+        loop {
+            // SAFETY: `pfd` is a valid, initialized pollfd and the count passed is 1.
+            let rc = unsafe { libc::poll(&mut pfd, 1, millis) };
+            if rc >= 0 {
+                return Ok(rc > 0);
+            }
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                return Err(HidrawIoError::Poll(err));
+            }
+        }
+    }
+
+    /// Reads one raw report (one `read(2)`) without interpreting it. End of stream is an
+    /// error.
+    pub fn read_report(&mut self) -> Result<Vec<u8>, HidrawIoError> {
+        self.read_chunk(0)
     }
 
     /// Test-only access to the underlying file, for rewinding a loopback file between a write

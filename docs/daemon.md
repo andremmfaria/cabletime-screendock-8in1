@@ -1,17 +1,17 @@
 # Daemon
 
-`screendockd run` is the daemon: it opens the dock's two hidraw nodes, sends heartbeats on MI_00, and captures, encodes, frames and writes video to MI_01. Source: `src/screendockd/src/daemon.rs` and the `run` subcommand in `src/main.rs`.
+`screendockd run` is the daemon: it opens the dock's two hidraw nodes, runs the MI_00 session (heartbeat, reader and handshake), and captures, encodes, frames and writes video to MI_01 once the session allows it. Source: `src/screendockd/src/daemon.rs` and the `run` subcommand in `src/main.rs`.
 
-Status: requires on-device validation. The loop is tested against regular files standing in for the nodes, a real Xvfb display and the prerecorded test encoder. See [hardware-validation.md](hardware-validation.md) for the on-device procedure.
+Status: requires on-device validation. The loop is tested against regular files standing in for the nodes, a simulated dock, a real Xvfb display and the prerecorded test encoder. See [hardware-validation.md](hardware-validation.md) for the on-device procedure.
 
 ## Usage
 
 ```text
 screendockd [--config PATH] run [--mi00 PATH] [--mi01 PATH] [--h264-file PATH]
-                                [--backend auto|x11|wayland] [--max-frames N]
+                                [--backend auto|x11|wayland] [--max-frames N] [--no-handshake]
 ```
 
-Without `--h264-file` the libx264 encoder is used, which needs a build with `--features encode-ffmpeg`. With it the prerecorded test encoder replays that Annex-B file. `--max-frames` stops after N frames; without it the daemon runs until SIGINT or SIGTERM. `--mi00` and `--mi01` replace sysfs discovery for that node.
+Without `--h264-file` the libx264 encoder is used, which needs a build with `--features encode-ffmpeg`. With it the prerecorded test encoder replays that Annex-B file. `--max-frames` stops after N frames; without it the daemon runs until SIGINT or SIGTERM. `--mi00` and `--mi01` replace sysfs discovery for that node. `--no-handshake` skips the handshake and the MI_00 reader and sends video at once; it is for regular files standing in for the nodes, since a real dock discards video until the handshake has run.
 
 ## Startup
 
@@ -22,22 +22,22 @@ Startup is fail fast. In this order, any failure prints the error chain and exit
 3. Open both nodes.
 4. Create the capture backend.
 5. Create the encoder.
-6. Write the first heartbeat (tick 1) to MI_00.
+6. Write the first heartbeat to MI_00 and start the session threads.
 
 ## Loops
 
-- Heartbeat thread: sends tick 2 and later on MI_00 every `daemon.heartbeat_interval_ms`, scheduled against fixed deadlines so write time does not accumulate as drift. Its tracing span is `heartbeat_loop`.
-- Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (width and height from the display geometry), then one `write(2)` per chunk back to back.
+- Session threads, owned by `session::Session`: a heartbeat thread that sends one heartbeat on MI_00 every `daemon.heartbeat_interval_ms` against fixed deadlines, independent of video writes; a reader thread that drains and parses the dock's MI_00 reports and answers its EDID passthrough; and a controller thread that runs the handshake and redoes it when the session is lost. See [protocol-implementation.md](protocol-implementation.md#session-handshake).
+- Video loop, on the main thread, span `video_loop`: `capture.next_frame()` (paced by the backend at `capture.fps`), `encoder.encode()`, framing each message with `MessageBuilder::video` (width and height from the display geometry), then one `write(2)` per report back to back. While the session is not armed the loop captures and writes nothing. When the session becomes armed again after a loss, the encoder is asked for a keyframe.
 
 ## Errors after startup
 
-Failures in the loop are per frame and recoverable. A failed capture, encode or write is logged at warn level and counted, the frame or message is dropped, and the loop continues. After an encode failure or a failed write the encoder is asked for a keyframe so the panel can resynchronize. A failed heartbeat write is logged and retried at the next tick.
+Failures in the loop are per frame and recoverable. A failed capture, encode or write is logged at warn level and counted, the frame or message is dropped, and the loop continues. After an encode failure or a failed write the encoder is asked for a keyframe so the panel can resynchronize. A failed heartbeat write is logged and retried at the next tick. A failed video write is reported to the session, which redoes the handshake. If the MI_00 reader dies (read error or end of stream) the daemon exits with an error.
 
 After 100 consecutive failed frames the daemon exits with an error, so a supervisor restarts it instead of the daemon spinning against a dead device. A successful frame resets the count. A progress line (frames, messages, write errors) is logged every 5 seconds at info level.
 
 ## Shutdown
 
-SIGINT and SIGTERM set a shared flag. The video loop checks it every frame and the heartbeat thread every 50 ms. The loop finishes the frame in flight, the heartbeat thread stops, handles close on drop and the process exits with status 0. A summary of counters (frames, messages, keyframes, errors by kind, heartbeats) is printed on exit.
+SIGINT and SIGTERM set a shared flag. The video loop checks it every frame and the session threads every 50 ms. The loop finishes the frame in flight, the session threads stop, handles close on drop and the process exits with status 0. A summary of counters (frames, messages, keyframes, errors by kind, heartbeats, handshakes, session losses) is printed on exit.
 
 ## Resolution
 
@@ -58,5 +58,5 @@ The same geometry sets the libx264 output size (the capture is scaled to it by t
 
 ## Tests
 
-- Unit tests in `daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and header size, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles.
+- Unit tests in `daemon.rs` use a synthetic capture backend, the prerecorded encoder and loopback files: message order and header size, heartbeat content, recovery from capture errors, giving up after too many, persistent write errors, a fatal startup heartbeat failure and rejected swapped handles. Session behavior is tested in `session.rs` and `tests/session_dock.rs` against a simulated dock: message bytes, handshake order, bounded waits, loss and redo, and that no video precedes the sink.
 - `tests/daemon_e2e.rs` runs the real binary against Xvfb with the prerecorded encoder and files for the nodes: it checks the video messages byte for byte against the source stream, the heartbeat, a clean exit on SIGTERM and on SIGINT, and a nonzero exit with no video written when a node cannot be opened.

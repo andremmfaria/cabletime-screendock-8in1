@@ -1,5 +1,7 @@
 //! End to end daemon test: the `run` subcommand against a real Xvfb display, the pre-recorded
-//! test encoder, and regular files standing in for the two hidraw nodes.
+//! test encoder, and regular files standing in for the two hidraw nodes. Files cannot hold a
+//! dock conversation, so these runs pass `--no-handshake`; the handshake is covered against a
+//! simulated dock in `tests/session_dock.rs`.
 //!
 //! Skips when Xvfb is unavailable (`SCREENDOCK_REQUIRE_XVFB=1` makes that a failure).
 
@@ -51,6 +53,7 @@ fn spawn_daemon(display: &str, dir: &Path, extra: &[&str]) -> Child {
         .arg(dir.join("mi00"))
         .arg("--mi01")
         .arg(dir.join("mi01"))
+        .arg("--no-handshake")
         .args(extra)
         .env("DISPLAY", display)
         .env_remove("WAYLAND_DISPLAY")
@@ -116,7 +119,8 @@ fn run_writes_expected_video_and_heartbeats_then_exits() {
     assert!(!beats.is_empty());
     let first: serde_json::Value = serde_json::from_slice(&beats[0].payload).unwrap();
     assert_eq!(first["method"], "heartbeat");
-    assert_eq!(first["params"]["session-id"], "1");
+    let id = first["params"]["session-id"].as_str().unwrap();
+    assert!(!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()));
 }
 
 #[test]

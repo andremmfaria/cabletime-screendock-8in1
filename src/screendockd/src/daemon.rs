@@ -1,4 +1,4 @@
-//! The capture, encode, frame and write loop plus the heartbeat thread (Milestones 6 and 7).
+//! The capture, encode, frame and write loop plus the MI_00 session (Milestones 6 and 7).
 //!
 //! [`run`] takes already opened handles and already constructed backends, so everything that can
 //! fail at startup (discovery, opening the nodes, creating the capture backend and encoder, the
@@ -8,8 +8,11 @@
 //! can resynchronize. Only a long unbroken run of failures ends the daemon with an error, so a
 //! supervisor restarts it instead of it spinning against a dead device.
 //!
-//! The heartbeat runs on its own thread against MI_00 with deadline scheduling; the video loop
-//! runs on the calling thread and is paced by the capture backend.
+//! MI_00 belongs to the [`Session`](crate::session::Session): its heartbeat, reader and
+//! handshake threads run independently of the video loop. The video loop runs on the calling
+//! thread, is paced by the capture backend, and writes nothing until the session is armed. When
+//! the session is lost it pauses, and when the handshake completes again it restarts from a
+//! keyframe.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -21,8 +24,8 @@ use crate::capture::CaptureBackend;
 use crate::display::DisplayGeometry;
 use crate::encode::Encoder;
 use crate::framing::{MessageBuilder, ReportId};
-use crate::heartbeat::heartbeat_message;
-use crate::hidraw_io::{HidrawHandle, HidrawIoError};
+use crate::hidraw_io::HidrawHandle;
+use crate::session::{Session, SessionError, SessionHandle, SessionSettings};
 
 /// Consecutive failed frames after which the daemon gives up.
 pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
@@ -30,8 +33,8 @@ pub const DEFAULT_MAX_CONSECUTIVE_ERRORS: u32 = 100;
 /// Pause after a failed capture so a broken backend cannot spin the CPU.
 const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(40);
 
-/// Longest single sleep in the heartbeat thread, so a stop request is noticed promptly.
-const STOP_POLL_SLICE: Duration = Duration::from_millis(50);
+/// Pause between checks while the session is not armed.
+const UNARMED_POLL: Duration = Duration::from_millis(20);
 
 /// How often the loop logs a progress line.
 const STATS_INTERVAL: Duration = Duration::from_secs(5);
@@ -42,22 +45,23 @@ pub enum DaemonError {
     /// A handle was opened for the wrong channel.
     #[error("{what} handle is the {got:?} channel")]
     WrongChannel { what: &'static str, got: ReportId },
-    /// The first heartbeat write failed, so the control channel is unusable.
-    #[error("startup heartbeat write failed: {0}")]
-    StartupHeartbeat(HidrawIoError),
+    /// The session could not start (for example the first heartbeat write failed).
+    #[error("session failed: {0}")]
+    Session(#[from] SessionError),
+    /// The session ended for good while the daemon ran (the MI_00 reader died).
+    #[error("session ended: {0}")]
+    SessionEnded(String),
     /// Too many frames in a row failed.
     #[error("{count} consecutive frame failures, last: {last}")]
     TooManyErrors { count: u32, last: String },
-    /// The heartbeat thread panicked.
-    #[error("heartbeat thread panicked")]
-    HeartbeatPanicked,
 }
 
 /// Loop settings.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct DaemonParams {
     pub geometry: DisplayGeometry,
-    pub heartbeat_interval: Duration,
+    /// MI_00 session settings: session id, handshake switch and timeouts.
+    pub session: SessionSettings,
     /// Stop after this many frames were sent (tests and dry runs); `None` runs until stopped.
     pub max_frames: Option<u64>,
     pub max_consecutive_errors: u32,
@@ -74,57 +78,19 @@ pub struct DaemonReport {
     pub write_errors: u64,
     pub heartbeats_sent: u64,
     pub heartbeat_errors: u64,
+    /// Times the session became armed (first handshake plus every redo).
+    pub handshakes: u64,
+    /// Times an armed session was lost and the handshake redone.
+    pub session_losses: u64,
+    /// Heartbeats the dock sent that the reader saw.
+    pub dock_heartbeats_seen: u64,
     pub elapsed: Duration,
-}
-
-#[derive(Debug, Default)]
-struct HeartbeatCounters {
-    sent: u64,
-    errors: u64,
-}
-
-/// Sends a heartbeat every `interval` starting at `first_tick`, logging and counting write
-/// failures instead of stopping. Ticks are scheduled against fixed deadlines.
-fn heartbeat_thread(
-    handle: &mut HidrawHandle,
-    interval: Duration,
-    first_tick: u64,
-    halt: &AtomicBool,
-) -> HeartbeatCounters {
-    let span = info_span!("heartbeat_loop");
-    let _guard = span.enter();
-    let start = Instant::now();
-    let mut counters = HeartbeatCounters::default();
-    let mut tick = first_tick;
-    // Deadline for `tick` is start + (tick - first_tick + 1) * interval, since the tick before
-    // `first_tick` was sent synchronously at startup.
-    loop {
-        let n = u32::try_from(tick - first_tick + 1).unwrap_or(u32::MAX);
-        let deadline = start + interval * n;
-        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-            if halt.load(Ordering::Relaxed) {
-                return counters;
-            }
-            std::thread::sleep(left.min(STOP_POLL_SLICE));
-        }
-        if halt.load(Ordering::Relaxed) {
-            return counters;
-        }
-        match handle.write_chunks(&heartbeat_message(tick)) {
-            Ok(_) => counters.sent += 1,
-            Err(e) => {
-                counters.errors += 1;
-                warn!(tick, error = %e, "heartbeat write failed, will retry on the next tick");
-            }
-        }
-        tick += 1;
-    }
 }
 
 /// Runs the daemon until `stop` is set, `params.max_frames` frames were sent, or too many frames
 /// in a row failed.
 pub fn run(
-    mut mi00: HidrawHandle,
+    mi00: HidrawHandle,
     mut mi01: HidrawHandle,
     capture: &mut dyn CaptureBackend,
     encoder: &mut dyn Encoder,
@@ -144,27 +110,28 @@ pub fn run(
         });
     }
 
-    // Fail fast: a dead control channel at startup means nothing else will work either.
-    mi00.write_chunks(&heartbeat_message(1))
-        .map_err(DaemonError::StartupHeartbeat)?;
-
+    // Fail fast: a dead control channel at startup means nothing else will work either. The
+    // first heartbeat is written before any thread starts.
     let started = Instant::now();
-    let halt = AtomicBool::new(false);
-    let mut report = DaemonReport {
-        heartbeats_sent: 1,
-        ..DaemonReport::default()
-    };
+    let session = Session::start(mi00, params.session.clone())?;
+    let handle = session.handle();
+    let mut report = DaemonReport::default();
 
-    let (loop_result, heartbeat) = std::thread::scope(|scope| {
-        let hb = scope.spawn(|| heartbeat_thread(&mut mi00, params.heartbeat_interval, 2, &halt));
-        let result = video_loop(&mut mi01, capture, encoder, params, stop, &mut report);
-        halt.store(true, Ordering::Relaxed);
-        (result, hb.join())
-    });
-
-    let heartbeat = heartbeat.map_err(|_| DaemonError::HeartbeatPanicked)?;
-    report.heartbeats_sent += heartbeat.sent;
-    report.heartbeat_errors = heartbeat.errors;
+    let loop_result = video_loop(
+        &mut mi01,
+        capture,
+        encoder,
+        params,
+        &handle,
+        stop,
+        &mut report,
+    );
+    let stats = session.shutdown()?;
+    report.heartbeats_sent = stats.heartbeats_sent;
+    report.heartbeat_errors = stats.heartbeat_errors;
+    report.handshakes = stats.handshakes;
+    report.session_losses = stats.losses;
+    report.dock_heartbeats_seen = stats.dock_heartbeats_seen;
     report.elapsed = started.elapsed();
     loop_result?;
     info!(?report, "daemon stopped");
@@ -176,6 +143,7 @@ fn video_loop(
     capture: &mut dyn CaptureBackend,
     encoder: &mut dyn Encoder,
     params: &DaemonParams,
+    session: &SessionHandle,
     stop: &AtomicBool,
     report: &mut DaemonReport,
 ) -> Result<(), DaemonError> {
@@ -188,6 +156,7 @@ fn video_loop(
     info!("video loop started");
 
     let mut consecutive: u32 = 0;
+    let mut generation = 0u64;
     let mut last_stats = Instant::now();
     let fail = |consecutive: &mut u32, what: String| -> Result<(), DaemonError> {
         *consecutive += 1;
@@ -202,6 +171,19 @@ fn video_loop(
 
     while !stop.load(Ordering::Relaxed) && params.max_frames.is_none_or(|m| report.frames_sent < m)
     {
+        if !session.is_armed() {
+            // Nothing is captured or written until the dock accepts video; the session thread
+            // owns the handshake and its timeouts.
+            if let Some(reason) = session.fatal() {
+                return Err(DaemonError::SessionEnded(reason));
+            }
+            std::thread::sleep(UNARMED_POLL);
+            continue;
+        }
+        if session.generation() != generation {
+            generation = session.generation();
+            encoder.request_keyframe();
+        }
         let frame = match capture.next_frame() {
             Ok(frame) => frame,
             Err(e) => {
@@ -225,6 +207,12 @@ fn video_loop(
 
         let mut frame_ok = true;
         for message in &messages {
+            if !session.is_armed() {
+                // Lost mid-frame: the rest of this frame would be dropped by the dock.
+                encoder.request_keyframe();
+                frame_ok = false;
+                break;
+            }
             let chunks = MessageBuilder::video(params.geometry.size())
                 .payload(message.as_bytes())
                 .build();
@@ -242,6 +230,7 @@ fn video_loop(
                 Err(e) => {
                     report.write_errors += 1;
                     warn!(error = %e, "video write failed, dropping message");
+                    session.report_failure("video write failed");
                     // The panel may now lack a reference frame; restart from a keyframe.
                     encoder.request_keyframe();
                     fail(&mut consecutive, e.to_string())?;
@@ -330,7 +319,8 @@ mod tests {
     fn params(max_frames: u64) -> DaemonParams {
         DaemonParams {
             geometry: geometry(),
-            heartbeat_interval: Duration::from_millis(20),
+            session: SessionSettings::new(geometry().size(), Duration::from_millis(20))
+                .without_handshake(),
             max_frames: Some(max_frames),
             max_consecutive_errors: 5,
         }
@@ -380,7 +370,10 @@ mod tests {
         heartbeat_read.read_to_end(&mut hb).unwrap();
         let first = parse_chunks(&[hb[..crate::framing::REPORT_SIZE].to_vec()]).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&first.payload).unwrap();
-        assert_eq!(value["params"]["session-id"], "1");
+        assert_eq!(value["method"], "heartbeat");
+        assert!(value["params"]["session-id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())));
     }
 
     #[test]
@@ -453,7 +446,10 @@ mod tests {
             &stop,
         )
         .unwrap_err();
-        assert!(matches!(err, DaemonError::StartupHeartbeat(_)));
+        assert!(matches!(
+            err,
+            DaemonError::Session(SessionError::StartupHeartbeat(_))
+        ));
     }
 
     #[test]
