@@ -5,13 +5,10 @@
 //! reduced to printable ASCII, and nothing here performs I/O.
 
 pub use super::types::{DisplayName, Edid, EdidError, EdidMode, Millimetres, RefreshMilliHz};
-use super::types::{EDID_BLOCK_LEN, EDID_HEADER};
-
-const DESCRIPTOR_START: usize = 54;
-const DESCRIPTOR_LEN: usize = 18;
-const DESCRIPTOR_COUNT: usize = 4;
-const NAME_TAG: u8 = 0xFC;
-const EXTENSION_COUNT_OFFSET: usize = 126;
+use super::types::{
+    DESCRIPTOR_COUNT, DESCRIPTOR_LEN, DESCRIPTOR_START, EDID_BLOCK_LEN, EDID_HEADER,
+    EXTENSION_COUNT_OFFSET, NAME_TAG,
+};
 
 impl DisplayName {
     /// Reduces descriptor text to printable ASCII, stopping at a line feed and replacing path

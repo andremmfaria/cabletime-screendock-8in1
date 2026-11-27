@@ -31,7 +31,7 @@ pub const DEFAULT_DEV_DIR: &str = "/dev";
 /// The resolved `/dev/hidrawN` path for MI_00 (control/heartbeat channel, Report ID 1).
 ///
 /// A distinct newtype rather than a bare `PathBuf` so this path can never be passed where a
-/// `Mi01Path` is expected (or vice versa) without an explicit, deliberate conversion — the
+/// `Mi01Path` is expected (or vice versa) without an explicit, deliberate conversion - the
 /// compiler catches a swapped-channel bug that would otherwise only surface as a silently
 /// miswired heartbeat/video channel on real hardware.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +84,7 @@ pub struct DockHidrawPaths {
 #[derive(Debug, Error)]
 pub enum DiscoveryError {
     /// The sysfs hidraw class directory couldn't be read at all (e.g. doesn't exist, no
-    /// permission) — distinct from "no matching device found".
+    /// permission) - distinct from "no matching device found".
     #[error("couldn't read hidraw class dir {path:?}: {source}")]
     HidrawClassDirUnreadable { path: PathBuf, source: io::Error },
     /// Walked every hidraw entry and found neither interface 0 nor interface 1 on a device

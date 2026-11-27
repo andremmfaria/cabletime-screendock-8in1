@@ -12,16 +12,7 @@ use crate::ports::control::{ControlClient, ControlError};
 use crate::protocol::control::{ControlRequest, ControlResponse};
 use crate::utils::config::Config;
 
-use super::types::{CtlAction, CtlArgs};
-
-/// Exit code for a daemon that rejected a valid request.
-const EXIT_REJECTED: u8 = 2;
-
-/// Exit code for no daemon on the socket.
-const EXIT_UNREACHABLE: u8 = 3;
-
-/// Exit code for an invalid request.
-const EXIT_INVALID: u8 = 4;
+use super::types::{CtlAction, CtlArgs, EXIT_INVALID, EXIT_REJECTED, EXIT_UNREACHABLE};
 
 fn request_for(action: &CtlAction) -> ControlRequest {
     match action {

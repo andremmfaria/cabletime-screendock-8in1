@@ -6,11 +6,8 @@
 pub use super::types::{
     DisplayEvent, DisplayEventSink, DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend,
     MonitorName, MonitorSpec, OutputFacts, OutputId, Rect, VdisplayError, VirtualDisplay,
-    VirtualMonitor, X11Tier,
+    VirtualMonitor, X11Tier, DEFAULT_MONITOR_NAME,
 };
-
-/// The name used when none is given.
-pub const DEFAULT_MONITOR_NAME: &str = "ScreenDock";
 
 impl MonitorName {
     /// Longest name a monitor gets.

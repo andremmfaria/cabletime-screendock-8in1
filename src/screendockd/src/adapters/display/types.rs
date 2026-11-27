@@ -383,3 +383,38 @@ pub(super) struct ZbusMutterCalls {
     pub(super) runtime: tokio::runtime::Runtime,
     pub(super) connection: zbus::Connection,
 }
+
+/// How long the provider waits for the portal to name its source types.
+pub(super) const PORTAL_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Horizontal and vertical blanking of the modes the daemon creates, reduced blanking style.
+pub(super) const H_BLANK: u32 = 160;
+pub(super) const V_BLANK: u32 = 30;
+pub(super) const REFRESH_HZ: u32 = 60;
+
+/// Bytes of an IPC message header: the magic, the length and the type.
+pub(super) const HEADER_LEN: usize = 14;
+
+// Replies of the sway IPC socket, parsed into typed fields.
+#[derive(Deserialize)]
+pub(super) struct RawRect {
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
+
+#[derive(Deserialize)]
+pub(super) struct RawOutput {
+    pub(super) name: String,
+    #[serde(default)]
+    pub(super) active: bool,
+    pub(super) rect: RawRect,
+}
+
+#[derive(Deserialize)]
+pub(super) struct RawResult {
+    pub(super) success: bool,
+    #[serde(default)]
+    pub(super) error: Option<String>,
+}

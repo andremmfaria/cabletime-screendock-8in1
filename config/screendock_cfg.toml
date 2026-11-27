@@ -4,7 +4,7 @@
 # src/screendockd/src/utils/config.rs's resolution order). It is also the packaged
 # default/template shipped by the .deb/.rpm build to /etc/screendockd/screendock_cfg.toml (see
 # src/screendockd/Cargo.toml's [package.metadata.deb]/[package.metadata.generate-rpm] asset
-# lists) — a package install can't pre-populate every future user's $XDG_CONFIG_HOME, so this
+# lists) - a package install can't pre-populate every future user's $XDG_CONFIG_HOME, so this
 # system-wide file is the fallback default until a user has their own
 # ~/.config/screendockd/screendock_cfg.toml.
 #

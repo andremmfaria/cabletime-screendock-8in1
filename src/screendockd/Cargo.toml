@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "1.4.2"
+version = "1.4.3"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -18,7 +18,7 @@ path = "src/main.rs"
 [dependencies]
 # Typed error enums in discovery.rs and protocol/framing.rs derive via thiserror.
 thiserror = "1"
-# utils/config.rs (personal project convention): serde + toml for simple, idiomatic TOML deserialization — chosen over the
+# utils/config.rs (personal project convention): serde + toml for simple, idiomatic TOML deserialization - chosen over the
 # `config` crate because the layered-source/env-var-override machinery `config` offers is
 # redundant here, since this project hand-implements its own explicit 4-step resolution order
 # (env var -> XDG user config -> /etc system default -> repo-root dev path) rather than
@@ -106,7 +106,7 @@ path = "tests/e2e/main.rs"
 # Packaging metadata for `cargo-deb` (CI builds this via `cargo deb`, see
 # .github/workflows/package.yml). The daemon is installed as a per-user systemd unit
 # (see deploy/screendockd.service), so the systemd unit ships to the system-wide
-# user-unit directory (/usr/lib/systemd/user/) rather than /lib/systemd/system/ —
+# user-unit directory (/usr/lib/systemd/user/) rather than /lib/systemd/system/ -
 # cargo-deb has no built-in "user unit" mode, so the unit is shipped as a plain asset
 # instead of using its `systemd-units` auto-integration (which assumes system units).
 [package.metadata.deb]
@@ -123,7 +123,7 @@ assets = [
     ["../../deploy/screendockd.service", "usr/lib/systemd/user/screendockd.service", "644"],
     # Packaged default/template config. utils/config.rs's resolution order falls back to this
     # system-wide path (third step) when no per-user $XDG_CONFIG_HOME/screendockd/ config
-    # exists yet — a package install can't pre-populate every future user's home directory, so
+    # exists yet - a package install can't pre-populate every future user's home directory, so
     # it ships a template here instead; see utils/config.rs for the full resolution order.
     ["../../config/screendock_cfg.toml", "etc/screendockd/screendock_cfg.toml", "644"],
     ["../../README.md", "usr/share/doc/screendockd/README.md", "644"],

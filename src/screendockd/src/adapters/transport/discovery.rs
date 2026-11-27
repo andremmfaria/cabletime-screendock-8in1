@@ -4,10 +4,10 @@
 //!
 //! The dock enumerates as composite USB `VID_1DE1&PID_F201`, with MI_00 (HID interface number 0,
 //! Report ID 1) and MI_01 (HID interface number 1, Report ID 2) sharing that VID/PID with MI_02
-//! (Audio) and MI_04 (Mass Storage) — both stock-class devices this driver never touches. The
+//! (Audio) and MI_04 (Mass Storage) - both stock-class devices this driver never touches. The
 //! resolution approach is: walk `/sys/class/hidraw/hidraw*/device/` symlinks back to each hidraw node's
 //! parent USB interface, read that interface's `bInterfaceNumber`, and match interface number 0
-//! to MI_00 and interface number 1 to MI_01 — cross-checking `idVendor`/`idProduct` on the
+//! to MI_00 and interface number 1 to MI_01 - cross-checking `idVendor`/`idProduct` on the
 //! shared USB device ancestor so an unrelated vendor-HID device elsewhere on the host is never
 //! mistaken for this dock.
 //!
@@ -18,7 +18,7 @@
 //! device (`1-2`, which exposes `idVendor`/`idProduct`).
 //!
 //! This module is a from-scratch reimplementation based solely on the above documented sysfs
-//! layout (clean-room) — it does not reference, and was
+//! layout (clean-room) - it does not reference, and was
 //! not derived from, any decompiled vendor code; the sysfs layout itself is standard Linux
 //! kernel/udev behavior, not anything vendor-specific.
 //!
@@ -83,7 +83,7 @@ impl DeviceIds {
 
 /// Reads a sysfs attribute file and returns its trimmed contents, or `None` on any I/O/parse
 /// problem. Discovery treats a missing/unreadable attribute on a given hidraw entry as "this
-/// entry isn't a usable match", not as a hard error for the whole scan — a malformed or
+/// entry isn't a usable match", not as a hard error for the whole scan - a malformed or
 /// unrelated entry elsewhere on the system shouldn't abort discovery of the real device.
 fn read_trimmed(path: &Path) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_string())
@@ -152,7 +152,7 @@ pub fn discover_with_ids(
         };
 
         if vendor_id != ids.vendor || product_id != ids.product {
-            // A real device on this interface number, just not this one — e.g. an unrelated
+            // A real device on this interface number, just not this one - e.g. an unrelated
             // vendor-HID device on the system. Cross-checking VID/PID here is exactly what
             // prevents that from being mismatched onto MI_00/MI_01.
             continue;
@@ -242,7 +242,7 @@ mod tests {
         }
 
         // An unrelated vendor HID device elsewhere on the (synthetic) system, also on
-        // interface 0, but with a different VID/PID — must not be mistaken for MI_00.
+        // interface 0, but with a different VID/PID - must not be mistaken for MI_00.
         let other_usb_dev = devices.join("usb2/3-4");
         fs::create_dir_all(&other_usb_dev).unwrap();
         fs::write(other_usb_dev.join("idVendor"), "046d\n").unwrap();

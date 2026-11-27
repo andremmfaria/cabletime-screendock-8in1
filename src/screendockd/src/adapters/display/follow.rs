@@ -5,12 +5,9 @@ use std::io::{ErrorKind, Read};
 use std::path::Path;
 
 use super::types::{
-    RectSource, SwayIpc, SwayOutputEvents, WatchTarget, IPC_MAGIC, IPC_MAX_PAYLOAD,
+    RectSource, SwayIpc, SwayOutputEvents, WatchTarget, HEADER_LEN, IPC_MAGIC, IPC_MAX_PAYLOAD,
 };
 use crate::ports::display::{Rect, VdisplayError};
-
-/// Bytes of an IPC message header: the magic, the length and the type.
-const HEADER_LEN: usize = 14;
 
 fn connection_err(e: impl std::fmt::Display) -> VdisplayError {
     VdisplayError::Connection(format!("sway ipc: {e}"))

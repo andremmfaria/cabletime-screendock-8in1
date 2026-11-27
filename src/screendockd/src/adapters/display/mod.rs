@@ -29,6 +29,7 @@ pub use self::recovery::recover;
 pub use self::sway_ipc::sway_output_facts;
 #[cfg(feature = "capture-wayland")]
 pub use self::types::AshpdPortalSource;
+use self::types::PORTAL_PROBE_TIMEOUT;
 pub use self::types::{ExpectedRect, MonitorWatcher, RectSource, WatchTarget, WATCH_DEBOUNCE};
 pub use self::types::{
     PortalMonitor, PortalRequest, PortalSource, PortalStream, PortalVirtualDisplay, TokenStore,
@@ -44,9 +45,6 @@ pub use self::types::{
 use crate::ports::display::{
     DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, VdisplayError, VirtualDisplay,
 };
-
-/// How long the provider waits for the portal to name its source types.
-const PORTAL_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl SystemDisplayProvider {
     /// A provider for the session described by the environment.

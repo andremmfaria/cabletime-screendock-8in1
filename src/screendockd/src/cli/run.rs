@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use signal_hook::consts::SIGHUP;
@@ -32,10 +31,7 @@ use super::support::{
     device_ids, geometry, load_config, resolve_nodes, session_settings, shutdown_flag,
     warn_if_not_char_device,
 };
-use super::types::{RunArgs, Services};
-
-/// How often the SIGHUP thread looks for a pending signal.
-const SIGHUP_POLL: Duration = Duration::from_millis(100);
+use super::types::{RunArgs, Services, SIGHUP_POLL};
 
 pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>) -> Result<()> {
     let geometry = geometry(config)?;

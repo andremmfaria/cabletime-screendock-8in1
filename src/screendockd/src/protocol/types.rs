@@ -386,3 +386,10 @@ pub enum EdidError {
     #[error("EDID declares {declared_blocks} blocks but holds only {len} bytes")]
     Truncated { declared_blocks: usize, len: usize },
 }
+
+// Layout of the EDID base block.
+pub(super) const DESCRIPTOR_START: usize = 54;
+pub(super) const DESCRIPTOR_LEN: usize = 18;
+pub(super) const DESCRIPTOR_COUNT: usize = 4;
+pub(super) const NAME_TAG: u8 = 0xFC;
+pub(super) const EXTENSION_COUNT_OFFSET: usize = 126;

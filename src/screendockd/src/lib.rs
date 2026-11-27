@@ -1,4 +1,4 @@
-//! `screendockd` — userspace Linux driver for the CABLETIME ScreenDock (CB09W).
+//! `screendockd` - userspace Linux driver for the CABLETIME ScreenDock (CB09W).
 //!
 //! Exposed as a library (in addition to the `screendockd` binary) so integration tests under
 //! `tests/` can exercise individual modules directly. See `docs/architecture.md` for the

@@ -89,3 +89,6 @@ pub struct DisplayInfo {
     pub native: EdidMode,
     pub modes: Vec<EdidMode>,
 }
+
+/// Bit of the portal's `AvailableSourceTypes` that marks a virtual source.
+pub(super) const PORTAL_SOURCE_VIRTUAL: u32 = 4;

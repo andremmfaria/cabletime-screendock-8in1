@@ -71,7 +71,7 @@ A unit in `~/.config/systemd/user/` takes precedence over the packaged one.
 
 ## Build from source
 
-See the root `README.md` for the feature table. Build requirements for each feature are listed in [encoding.md](encoding.md#libx264-encoder-feature-encode-ffmpeg) and [capture.md](capture.md#wayland-backend-wayland_portalrs). Quality checks are in [testing.md](testing.md).
+See the root `README.md` for the feature table. Build requirements for each feature are listed in [encoding.md](encoding.md#libx264-encoder-feature-encode-ffmpeg) and [capture.md](capture.md#wayland-backend-adapterscapturewayland_portalrs). Quality checks are in [testing.md](testing.md).
 
 ## Verification
 

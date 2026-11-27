@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        # The crate lives at src/screendockd/, not the repo root — every cargo invocation below runs from there.
+        # The crate lives at src/screendockd/, not the repo root - every cargo invocation below runs from there.
         working-directory: src/screendockd
     steps:
       - uses: actions/checkout@v4

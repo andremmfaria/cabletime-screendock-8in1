@@ -9,11 +9,9 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
-use serde::Deserialize;
-
 use super::types::{
-    SwayIpc, SwayOutput, IPC_GET_OUTPUTS, IPC_MAGIC, IPC_MAX_PAYLOAD, IPC_RUN_COMMAND,
-    IPC_SUBSCRIBE, IPC_TIMEOUT,
+    RawOutput, RawResult, SwayIpc, SwayOutput, IPC_GET_OUTPUTS, IPC_MAGIC, IPC_MAX_PAYLOAD,
+    IPC_RUN_COMMAND, IPC_SUBSCRIBE, IPC_TIMEOUT,
 };
 use crate::ports::display::{OutputFacts, OutputId, Rect, VdisplayError};
 
@@ -43,29 +41,6 @@ pub fn encode_message(kind: u32, payload: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&kind.to_ne_bytes());
     out.extend_from_slice(payload);
     out
-}
-
-#[derive(Deserialize)]
-struct RawRect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Deserialize)]
-struct RawOutput {
-    name: String,
-    #[serde(default)]
-    active: bool,
-    rect: RawRect,
-}
-
-#[derive(Deserialize)]
-struct RawResult {
-    success: bool,
-    #[serde(default)]
-    error: Option<String>,
 }
 
 impl SwayIpc {

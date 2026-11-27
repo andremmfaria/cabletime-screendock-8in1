@@ -6,17 +6,14 @@ use x11rb::protocol::xproto::ConnectionExt as _;
 use x11rb::CURRENT_TIME;
 
 use super::facts::connect;
-use super::types::{RandrBackend, RectSource, ScreenSize, WatchTarget, XRandr};
+use super::types::{
+    RandrBackend, RectSource, ScreenSize, WatchTarget, XRandr, H_BLANK, REFRESH_HZ, V_BLANK,
+};
 use crate::ports::display::{OutputId, Rect, VdisplayError};
 
 fn request_err(e: impl std::fmt::Display) -> VdisplayError {
     VdisplayError::Request(e.to_string())
 }
-
-/// Horizontal and vertical blanking of the modes the daemon creates, reduced blanking style.
-const H_BLANK: u32 = 160;
-const V_BLANK: u32 = 30;
-const REFRESH_HZ: u32 = 60;
 
 impl XRandr {
     /// Connects to `display` (or `$DISPLAY`) and checks for RandR 1.5.

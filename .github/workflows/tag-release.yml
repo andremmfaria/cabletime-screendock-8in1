@@ -1,7 +1,7 @@
 name: Tag Release
 
 # Fires on every push to main. The job below reads the crate's SemVer version out of
-# Cargo.toml and makes sure a `v<version>` tag exists pointing at the new tip — moving it
+# Cargo.toml and makes sure a `v<version>` tag exists pointing at the new tip - moving it
 # forward if the version string hasn't changed since the tag was last set, or creating a
 # brand-new tag if the version itself changed. The `package` job then calls package.yml
 # directly, because a tag pushed with GITHUB_TOKEN does not trigger other workflows.
@@ -10,7 +10,7 @@ on:
     branches: [main]
 
 # contents: write is required to create/move a tag and push it back to the repo using the
-# workflow's own GITHUB_TOKEN — no extra secret is configured or needed.
+# workflow's own GITHUB_TOKEN - no extra secret is configured or needed.
 permissions:
   contents: write
 
@@ -48,7 +48,7 @@ jobs:
           # "force-create locally, then force-push just that ref". If Cargo.toml's version is
           # unchanged since the last push to main, this re-points the existing v<version> tag at
           # the new commit (e.g. a docs-only or CI-only commit after a release). If the version
-          # changed, this is effectively a brand-new tag name — the old tag, if any, is untouched.
+          # changed, this is effectively a brand-new tag name - the old tag, if any, is untouched.
           git tag -f "$TAG" "$GITHUB_SHA"
 
           # Force-push only this one tag ref, not --tags (which would force-push every tag in the

@@ -512,3 +512,6 @@ pub trait DisplayProvider: Send {
     /// A display that shows an existing output instead of a new monitor.
     fn mirror(&self, anchor: &str) -> Result<Box<dyn VirtualDisplay>, VdisplayError>;
 }
+
+/// The name used when none is given.
+pub const DEFAULT_MONITOR_NAME: &str = "ScreenDock";

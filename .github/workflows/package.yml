@@ -11,7 +11,7 @@ on:
   workflow_dispatch: {}
 
 # contents: write is required to create/update the GitHub Release and attach assets to it,
-# using the workflow's own GITHUB_TOKEN — no extra secret is configured or needed.
+# using the workflow's own GITHUB_TOKEN - no extra secret is configured or needed.
 permissions:
   contents: write
 
@@ -54,19 +54,19 @@ jobs:
           cargo install cargo-deb --locked
           cargo install cargo-generate-rpm --locked
 
-      # (1) .crate — the Cargo/crates.io package archive format. This deliberately stops at
+      # (1) .crate - the Cargo/crates.io package archive format. This deliberately stops at
       # `cargo package` and never runs `cargo publish`: a real crates.io publish needs an API
       # token secret nobody has configured yet, and this project isn't ready for a public
       # crates.io release. See the "Follow-ups" note in the project's CI docs/summary.
       - name: Build .crate package (cargo package, NOT cargo publish)
         run: cargo package --allow-dirty
 
-      # (2) .deb — built via cargo-deb using the [package.metadata.deb] section in Cargo.toml
+      # (2) .deb - built via cargo-deb using the [package.metadata.deb] section in Cargo.toml
       # (maintainer/section/depends/assets for the binary + udev rule + systemd user unit).
       - name: Build .deb package (cargo deb)
         run: cargo deb --no-build
 
-      # (3) .rpm — built via cargo-generate-rpm using the [package.metadata.generate-rpm]
+      # (3) .rpm - built via cargo-generate-rpm using the [package.metadata.generate-rpm]
       # section in Cargo.toml, mirroring the same asset layout as the .deb.
       - name: Build .rpm package (cargo generate-rpm)
         run: cargo generate-rpm

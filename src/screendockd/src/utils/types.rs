@@ -318,7 +318,7 @@ pub enum ConfigError {
     },
 }
 
-/// Environment variable `tracing-subscriber`'s `EnvFilter` reads for a level override — the
+/// Environment variable `tracing-subscriber`'s `EnvFilter` reads for a level override - the
 /// same `RUST_LOG` convention `log`/`env_logger` users already expect, so this isn't a new
 /// environment variable to document.
 pub(super) const LOG_LEVEL_ENV_VAR: &str = "RUST_LOG";

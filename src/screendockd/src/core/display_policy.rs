@@ -1,6 +1,7 @@
 //! Pure display policy: which virtual monitor mechanism to use for the facts the environment
 //! reports, and where the monitor sits. No I/O; the facts come from an adapter.
 
+use super::types::PORTAL_SOURCE_VIRTUAL;
 pub use super::types::{
     DisplayDecision, DisplayPolicyError, ExtendBackend, VirtualSupport, X11Tier,
 };
@@ -9,9 +10,6 @@ use crate::ports::display::{DisplayFacts, DisplayServer, Rect};
 use crate::utils::types::{
     DisplayMode, FallbackPolicy, Placement, VirtualDisplayConfig, WaylandBackend,
 };
-
-/// Bit of the portal's `AvailableSourceTypes` that marks a virtual source.
-const PORTAL_SOURCE_VIRTUAL: u32 = 4;
 
 fn desktop_has(facts: &DisplayFacts, name: &str) -> bool {
     facts

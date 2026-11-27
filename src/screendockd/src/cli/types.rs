@@ -5,7 +5,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
-#[cfg(feature = "tools")]
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -266,3 +265,15 @@ pub(super) struct Services {
     pub(super) sighup: Option<JoinHandle<()>>,
     pub(super) supervisor: Option<JoinHandle<()>>,
 }
+
+/// Exit code for a daemon that rejected a valid request.
+pub(super) const EXIT_REJECTED: u8 = 2;
+
+/// Exit code for no daemon on the socket.
+pub(super) const EXIT_UNREACHABLE: u8 = 3;
+
+/// Exit code for an invalid request.
+pub(super) const EXIT_INVALID: u8 = 4;
+
+/// How often the SIGHUP thread looks for a pending signal.
+pub(super) const SIGHUP_POLL: Duration = Duration::from_millis(100);

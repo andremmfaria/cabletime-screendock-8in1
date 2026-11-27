@@ -3,16 +3,16 @@
 //! ## Library choice: `tracing` + `tracing-subscriber`, not `log` + `env_logger`
 //!
 //! Two real options:
-//! - **`log` + `env_logger`**: the simpler, older de facto standard — a single global logger,
+//! - **`log` + `env_logger`**: the simpler, older de facto standard - a single global logger,
 //!   flat log lines, level filtering via `RUST_LOG`.
-//! - **`tracing` + `tracing-subscriber`**: structured, span-aware logging — log events can
+//! - **`tracing` + `tracing-subscriber`**: structured, span-aware logging - log events can
 //!   carry key/value fields, and spans let related events (e.g. everything emitted while
 //!   handling one capture/encode cycle) be grouped and attributed even across thread
 //!   boundaries.
 //!
 //! **Decision: `tracing` + `tracing-subscriber`.** This daemon's Architecture (see
 //! `docs/architecture.md`) is a single process running several independent
-//! threads/loops concurrently — capture, encode, heartbeat, framing/hidraw I/O — and a plain
+//! threads/loops concurrently - capture, encode, heartbeat, framing/hidraw I/O - and a plain
 //! `log`-style flat line (`"write failed"`) loses which loop/thread/device emitted it the
 //! moment two loops are active at once. `tracing`'s spans let each loop wrap its work in a
 //! named span (e.g. `heartbeat_tick`, `capture_frame`) so every event inside it is
@@ -31,7 +31,7 @@ use crate::utils::config::Config;
 ///
 /// Level precedence: `RUST_LOG`, if set, always wins (so an operator can bump verbosity for one
 /// run without editing the config file); otherwise falls back to `config.daemon.log_level`.
-/// Output format is plain, single-line-per-event text with level and target — the sensible
+/// Output format is plain, single-line-per-event text with level and target - the sensible
 /// default for a systemd-managed daemon, since `journalctl` already adds its own timestamp and
 /// unit-name framing around each line, so this doesn't duplicate that.
 ///
@@ -81,7 +81,7 @@ mod tests {
 
     /// `init_logging` installs a real global subscriber as a side effect, so only one test in
     /// the whole process may successfully call it (a second call is expected to return
-    /// `Err(TryInitError)`, which this test treats as a pass, not a failure) — this proves the
+    /// `Err(TryInitError)`, which this test treats as a pass, not a failure) - this proves the
     /// function builds a valid filter/subscriber from a `Config` without panicking, which is
     /// the behavior worth testing without coupling the test suite to global init ordering.
     #[test]

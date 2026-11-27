@@ -5,14 +5,14 @@
 //! Two real options were evaluated:
 //! - **`serde` + `toml`**: simple, idiomatic `Deserialize`-derive loading of a single TOML
 //!   file into a plain Rust struct. No source-layering/merging machinery of its own.
-//! - **`config` crate**: layered configuration — merges multiple sources (files, env vars,
+//! - **`config` crate**: layered configuration - merges multiple sources (files, env vars,
 //!   defaults) with built-in precedence rules and env-var overrides.
 //!
 //! **Decision: `serde` + `toml`.** This project's resolution order (below) is explicit,
 //! hand-written, and already does exactly the kind of override logic the `config` crate would
 //! otherwise provide generically (env var > XDG user path > system path > repo-root dev path).
 //! Pulling in `config` would mean using it for only the single-file-deserialization half of
-//! its job while reimplementing the precedence logic ourselves anyway — redundant dependency
+//! its job while reimplementing the precedence logic ourselves anyway - redundant dependency
 //! weight for a daemon with one config file and one owner. `serde`/`toml` is the simpler,
 //! smaller, and more idiomatic choice for "deserialize one TOML file into a struct", which is
 //! all this module actually needs.
@@ -20,14 +20,14 @@
 //! ## Path resolution order (the "repo root vs. installed-system path" wrinkle)
 //!
 //! A packaged `.deb`/`.rpm` (built by the existing packaging workflow) cannot assume the config
-//! lives at a path relative to the compiled binary's `CARGO_MANIFEST_DIR` — that directory only
+//! lives at a path relative to the compiled binary's `CARGO_MANIFEST_DIR` - that directory only
 //! exists in a development checkout, not on a system where the package was installed. Nor can
 //! a system package pre-populate every future user's `$XDG_CONFIG_HOME` at install time, since
 //! that directory belongs to a specific user account that may not even exist yet when the
 //! package is installed. The resolution order below accounts for both constraints explicitly,
 //! checked in this order, first match wins:
 //!
-//! 1. **`SCREENDOCK_CONFIG_PATH` environment variable**, if set — an explicit, unambiguous
+//! 1. **`SCREENDOCK_CONFIG_PATH` environment variable**, if set - an explicit, unambiguous
 //!    override for testing, scripting, or non-standard layouts. Always wins if present.
 //! 2. **`$XDG_CONFIG_HOME/screendockd/screendock_cfg.toml`**, defaulting to
 //!    `~/.config/screendockd/screendock_cfg.toml` per the XDG Base Directory spec, resolved via
@@ -36,9 +36,9 @@
 //!    the convention differs). This is the real per-user installed-system path: the existing
 //!    `[package.metadata.deb]`/`[package.metadata.generate-rpm]` asset lists in
 //!    `src/screendockd/Cargo.toml` ship `deploy/screendockd.service` as a **per-user** systemd
-//!    unit (`usr/lib/systemd/user/`), not a system unit — so the natural "installed" config
+//!    unit (`usr/lib/systemd/user/`), not a system unit - so the natural "installed" config
 //!    home is the user's own XDG config dir, not a single shared system file.
-//! 3. **`/etc/screendockd/screendock_cfg.toml`** — a system-wide default/template. This exists
+//! 3. **`/etc/screendockd/screendock_cfg.toml`** - a system-wide default/template. This exists
 //!    specifically because a `.deb`/`.rpm` install happens once, system-wide, at package-install
 //!    time, before any particular user account necessarily exists or has ever run the daemon;
 //!    the package cannot write into `~/.config` for users it doesn't know about yet. Shipping a
@@ -47,7 +47,7 @@
 //!    packaging asset lists in `src/screendockd/Cargo.toml` (both `[package.metadata.deb]` and
 //!    `[package.metadata.generate-rpm]`), which now ship `config/screendock_cfg.toml` from the
 //!    repo there.
-//! 4. **`CARGO_MANIFEST_DIR/../../config/screendock_cfg.toml`** — the repo-root dev-convenience
+//! 4. **`CARGO_MANIFEST_DIR/../../config/screendock_cfg.toml`** - the repo-root dev-convenience
 //!    path, resolving to `<repo root>/config/screendock_cfg.toml` from this crate's location
 //!    at `src/screendockd/` (one level below the repo root). Last-resort fallback, only useful
 //!    when running straight out of a git checkout with no installed config anywhere.
@@ -159,7 +159,7 @@ impl WaylandBackend {
 /// without reading or parsing it. Exposed separately from `load()` so callers/tests can inspect
 /// which path would be used without requiring a file to actually exist there.
 pub fn resolve_config_path() -> Option<PathBuf> {
-    // 1. Explicit environment variable override — always wins if set.
+    // 1. Explicit environment variable override - always wins if set.
     if let Ok(path) = env::var(CONFIG_PATH_ENV_VAR) {
         let path = PathBuf::from(path);
         if path.is_file() {
@@ -204,7 +204,7 @@ pub fn load() -> Result<Config, ConfigError> {
     load_from_path(&path)
 }
 
-/// Loads and parses a specific config path directly, bypassing resolution — used by `load()`
+/// Loads and parses a specific config path directly, bypassing resolution - used by `load()`
 /// and directly by tests that want to load a known fixture path.
 pub fn load_from_path(path: &std::path::Path) -> Result<Config, ConfigError> {
     let contents = std::fs::read_to_string(path).map_err(|source| ConfigError::Unreadable {

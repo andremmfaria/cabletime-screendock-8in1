@@ -2,7 +2,7 @@
 //! shapes documented in `docs/research/full-protocol-spec-2026-11-21.md`.
 //!
 //! The H.264 NAL *content* inside each fixture is synthetic placeholder bytes of the correct
-//! length and with the correct NAL-type header byte — the research docs' own pcap files aren't
+//! length and with the correct NAL-type header byte - the research docs' own pcap files aren't
 //! available in this sandbox, and `framing.rs`'s job is the header/chunking math, not H.264
 //! content validation. Exact byte offsets/values asserted below come directly from the
 //! documented wire layout, not guessed.
