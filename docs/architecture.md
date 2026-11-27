@@ -12,7 +12,7 @@ session: heartbeat thread  -> framing -> hidraw_io (MI_00, Report ID 1, writes)
 discovery resolves the two /dev/hidrawN paths once at startup
 ```
 
-Session arming rule: video is allowed in `Active` (every reply seen) and in `AssumedActive`. `AssumedActive` is entered when the ready wait or a reply wait times out, including when the dock sent no MI_00 message at all. Heartbeats continue and the reader keeps draining while armed. A later ready announcement, repeated heartbeat write failures or repeated video write failures send the controller back through the full handshake.
+Session arming rule: video is allowed in `Active` (every reply seen) and in `AssumedActive`. `AssumedActive` is entered when the ready wait or a reply wait times out, including when the dock sent no MI_00 message at all; the full handshake message sequence is sent in that case too, because a silent dock still processes it. Heartbeats continue and the reader keeps draining while armed. A later ready announcement, repeated heartbeat write failures or repeated video write failures send the controller back through the full handshake.
 
 The dock exposes two HID interfaces under one VID/PID. MI_00 is the JSON-RPC control channel (Report ID 1) and MI_01 is the video channel (Report ID 2). `/dev/hidrawN` numbering is not stable, so nodes are resolved by sysfs interface number.
 
