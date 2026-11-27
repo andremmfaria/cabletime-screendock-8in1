@@ -1,6 +1,6 @@
 [package]
 name = "screendockd"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 description = "Independent, unofficial Linux userspace driver for the CABLETIME ScreenDock (CB09W, VID_1DE1&PID_F201). Not affiliated with or endorsed by CableTime."
 license = "MIT"
@@ -126,6 +126,11 @@ assets = [
     # exists yet — a package install can't pre-populate every future user's home directory, so
     # it ships a template here instead; see utils/config.rs for the full resolution order.
     ["../../config/screendock_cfg.toml", "etc/screendockd/screendock_cfg.toml", "644"],
+    ["../../README.md", "usr/share/doc/screendockd/README.md", "644"],
+    ["../../docs/install.md", "usr/share/doc/screendockd/install.md", "644"],
+    ["../../docs/configuration.md", "usr/share/doc/screendockd/configuration.md", "644"],
+    ["../../docs/control.md", "usr/share/doc/screendockd/control.md", "644"],
+    ["../../docs/virtual-display.md", "usr/share/doc/screendockd/virtual-display.md", "644"],
 ]
 # Runtime library dependencies are derived from the release binary (it links libavcodec and
 # friends when built with the encode-ffmpeg feature, and libpipewire with capture-wayland); the
@@ -147,6 +152,11 @@ assets = [
     # See the matching entry in [package.metadata.deb] above for why this ships a system-wide
     # template rather than relying solely on a per-user XDG config.
     { source = "../../config/screendock_cfg.toml", dest = "/etc/screendockd/screendock_cfg.toml", mode = "644" },
+    { source = "../../README.md", dest = "/usr/share/doc/screendockd/README.md", mode = "644", doc = true },
+    { source = "../../docs/install.md", dest = "/usr/share/doc/screendockd/install.md", mode = "644", doc = true },
+    { source = "../../docs/configuration.md", dest = "/usr/share/doc/screendockd/configuration.md", mode = "644", doc = true },
+    { source = "../../docs/control.md", dest = "/usr/share/doc/screendockd/control.md", mode = "644", doc = true },
+    { source = "../../docs/virtual-display.md", dest = "/usr/share/doc/screendockd/virtual-display.md", mode = "644", doc = true },
 ]
 
 # The binary links libavcodec/libavformat/libavutil/libswscale (encode-ffmpeg feature);

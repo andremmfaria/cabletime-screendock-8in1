@@ -33,7 +33,7 @@ jobs:
       - name: Install system packages
         run: >
           sudo apt-get update && sudo apt-get install -y xvfb
-          xorg xserver-xorg-video-dummy x11-xserver-utils
+          xorg xserver-xorg-video-dummy x11-xserver-utils rpm
           libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
           libx264-dev libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
 
@@ -80,6 +80,11 @@ jobs:
           cp target/debian/*.deb dist/
           cp target/generate-rpm/*.rpm dist/
           ls -l dist/
+
+      # Inspects both packages: payload files and modes, the PipeWire runtime dependency, the
+      # unit lines, and a start of the packaged binary from an extracted root.
+      - name: Check package contents
+        run: ../../deploy/check-packages.sh dist
 
       # softprops/action-gh-release in update mode: if tag-release.yml moved an existing tag
       # (version unchanged, new commit), this updates that tag's existing release in place
