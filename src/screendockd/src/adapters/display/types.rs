@@ -34,6 +34,7 @@ pub trait RectSource: Send {
 
 /// A thread that reports changes made to the monitor from outside the daemon. Dropping it
 /// stops the thread.
+#[derive(Debug)]
 pub struct MonitorWatcher {
     pub(super) stop: Arc<AtomicBool>,
     pub(super) thread: Option<JoinHandle<()>>,
@@ -283,12 +284,24 @@ pub struct WlrootsMonitor {
     pub(super) ipc: SwayIpc,
     pub(super) name: String,
     pub(super) rect: Rect,
+    /// What the watcher compares the layout with; changed before every change we make.
+    pub(super) expected: ExpectedRect,
+    pub(super) watcher: Option<MonitorWatcher>,
+}
+
+/// The sway `output` events and the output list, as a watcher's source of changes.
+pub struct SwayOutputEvents {
+    pub(super) events: std::os::unix::net::UnixStream,
+    /// Bytes read from the event connection that do not yet make a whole message.
+    pub(super) queued: Vec<u8>,
+    pub(super) query: SwayIpc,
 }
 
 /// Magic bytes that start every IPC message.
 pub(super) const IPC_MAGIC: &[u8; 6] = b"i3-ipc";
 /// Message types of the IPC requests the adapter sends.
 pub(super) const IPC_RUN_COMMAND: u32 = 0;
+pub(super) const IPC_SUBSCRIBE: u32 = 2;
 pub(super) const IPC_GET_OUTPUTS: u32 = 3;
 /// Largest reply payload read.
 pub(super) const IPC_MAX_PAYLOAD: usize = 1 << 20;

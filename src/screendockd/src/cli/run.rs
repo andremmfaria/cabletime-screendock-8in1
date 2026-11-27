@@ -111,6 +111,7 @@ pub(super) fn run(args: RunArgs, config: &Config, config_path: Option<&PathBuf>)
         config.virtual_display.edid,
         (geometry.width().0 as u16, geometry.height().0 as u16),
     );
+    pipeline.set_events(commands.clone());
     let services = Services::start(
         config,
         live,

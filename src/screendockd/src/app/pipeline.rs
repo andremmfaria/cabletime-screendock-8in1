@@ -6,8 +6,8 @@ use std::sync::{Arc, MutexGuard};
 use std::time::{Duration, Instant};
 
 use super::types::{
-    DisplayState, PipelineShared, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT, VERIFY_MESSAGES,
-    VERIFY_WINDOW,
+    DisplayState, PipelineShared, StreamWatch, APPLY_TIMEOUT, CYCLE_APPLY_TIMEOUT,
+    STREAM_MISMATCH_FRAMES, STREAM_SETTLE, VERIFY_MESSAGES, VERIFY_WINDOW,
 };
 pub use super::types::{EncoderBuilder, EncoderPipeline, PipelineKnobs, PipelineState};
 use crate::app::supervisor::PipelineHandle;
@@ -15,6 +15,8 @@ use crate::core::display_info::DisplayInfo;
 use crate::core::reconfig::{ChangeClass, LiveSettings, PlanOptions, ReconfigAction, ReconfigPlan};
 use crate::core::session::SessionHandle;
 use crate::ports::capture::{CaptureArea, CaptureTarget, Frame, PixelFormat};
+use crate::ports::control::Command;
+use crate::ports::display::{DisplayEvent, Rect};
 use crate::ports::encode::{EncodeError, Encoder, EncoderSettings, DEFAULT_FPS};
 use crate::ports::transport::EdidStore;
 use crate::protocol::display::DisplayGeometry;
@@ -122,7 +124,74 @@ impl PipelineState {
                 cached: None,
                 dock: None,
             }),
+            stream: std::sync::Mutex::new(StreamWatch {
+                area: knobs.area,
+                since: Instant::now(),
+                mismatched: 0,
+                reported: None,
+                settle: STREAM_SETTLE,
+            }),
+            events: std::sync::Mutex::new(None),
         })
+    }
+
+    /// Reports a captured stream that changes its size to `events` as a display event.
+    pub fn set_events(&self, events: std::sync::mpsc::Sender<Command>) {
+        *self.events.lock().unwrap_or_else(|e| e.into_inner()) = Some(events);
+    }
+
+    /// Changes how long frames at the old size are ignored after the capture area changed.
+    pub fn set_stream_settle(&self, settle: Duration) {
+        self.stream.lock().unwrap_or_else(|e| e.into_inner()).settle = settle;
+    }
+
+    /// For the video loop: a frame of `width` by `height` arrived. When the capture area is
+    /// a stream and the frames keep another size than the one asked for, the compositor
+    /// renegotiated the stream, and the new size is reported once as a display event. Frames
+    /// still at the old size right after the daemon changed the area are not a change.
+    pub fn note_frame_size(&self, width: u32, height: u32) {
+        let area = self.knobs().area;
+        let mut watch = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        if watch.area != area {
+            *watch = StreamWatch {
+                area,
+                since: Instant::now(),
+                mismatched: 0,
+                reported: None,
+                settle: watch.settle,
+            };
+        }
+        let CaptureArea::Stream {
+            width: asked_width,
+            height: asked_height,
+            ..
+        } = area
+        else {
+            return;
+        };
+        if (width, height) == (asked_width, asked_height) {
+            watch.mismatched = 0;
+            watch.reported = None;
+            return;
+        }
+        if watch.since.elapsed() < watch.settle {
+            return;
+        }
+        watch.mismatched += 1;
+        if watch.mismatched < STREAM_MISMATCH_FRAMES || watch.reported == Some((width, height)) {
+            return;
+        }
+        watch.reported = Some((width, height));
+        drop(watch);
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(events) = events.as_ref() {
+            let rect = Rect::new(0, 0, width, height);
+            let _ = events.send(Command::Display(DisplayEvent::Changed {
+                rect,
+                resized: true,
+                moved: false,
+            }));
+        }
     }
 
     /// Sets where the dock's EDID is cached and what to report when none is known, and loads
@@ -569,5 +638,85 @@ mod tests {
         .unwrap();
         assert_eq!(pipeline.apply(&plan_change(&old, &new), &new), Ok(()));
         assert!(state.pending(0).is_none());
+    }
+
+    fn stream_state(settle: Duration) -> (Arc<PipelineState>, std::sync::mpsc::Receiver<Command>) {
+        let knobs = PipelineKnobs {
+            area: CaptureArea::Stream {
+                node: 7,
+                width: 1280,
+                height: 720,
+            },
+            ..PipelineKnobs::for_geometry(
+                DisplayGeometry::new(1280, 720, crate::protocol::display::Orientation::Landscape)
+                    .unwrap(),
+            )
+        };
+        let state = PipelineState::new(knobs, false);
+        state.set_stream_settle(settle);
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.set_events(tx);
+        (state, rx)
+    }
+
+    #[test]
+    fn a_stream_that_keeps_another_size_is_reported_once() {
+        let (state, rx) = stream_state(Duration::ZERO);
+        for _ in 0..20 {
+            state.note_frame_size(1600, 900);
+        }
+        let Ok(Command::Display(DisplayEvent::Changed {
+            rect,
+            resized,
+            moved,
+        })) = rx.try_recv()
+        else {
+            panic!("no display event");
+        };
+        assert_eq!(
+            (rect, resized, moved),
+            (Rect::new(0, 0, 1600, 900), true, false)
+        );
+        assert!(rx.try_recv().is_err(), "reported twice");
+    }
+
+    #[test]
+    fn a_few_frames_at_another_size_are_not_a_renegotiation() {
+        let (state, rx) = stream_state(Duration::ZERO);
+        for _ in 0..4 {
+            state.note_frame_size(1600, 900);
+        }
+        state.note_frame_size(1280, 720);
+        for _ in 0..4 {
+            state.note_frame_size(1600, 900);
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn frames_at_the_old_size_after_the_daemon_changed_the_area_are_not_reported() {
+        let (state, rx) = stream_state(Duration::from_secs(60));
+        for _ in 0..20 {
+            state.note_frame_size(1600, 900);
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn sizes_are_not_watched_unless_a_stream_is_captured() {
+        let state = PipelineState::new(
+            PipelineKnobs::for_geometry(
+                DisplayGeometry::new(1280, 720, crate::protocol::display::Orientation::Landscape)
+                    .unwrap(),
+            ),
+            false,
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        state.set_events(tx);
+        state.set_stream_settle(Duration::ZERO);
+        for _ in 0..20 {
+            state.note_frame_size(1600, 900);
+        }
+        assert!(rx.try_recv().is_err());
     }
 }

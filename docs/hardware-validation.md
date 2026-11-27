@@ -255,6 +255,8 @@ WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 WLR_RENDERER=pixman sway -c /dev
 
 Not verified: a prompt free `xdg-desktop-portal-wlr` screencast of a headless output, frames read from the output by the daemon, and sway on real hardware. Status: requires validation.
 
+Changes from outside the daemon were checked on headless sway: `swaymsg output <name> mode 1600x900`, `output <name> pos 0 720` and `output <name> unplug` on the daemon's output are each seen through the sway `output` events within 2 seconds. After a mode change sway reported the output at a different x than before, because it lays outputs out itself. Stream renegotiation on GNOME is not validated.
+
 ## Headless GNOME Shell
 
 Validated on the development host (Ubuntu 26.04, GNOME Shell 50.1 with Mutter 50.1, PipeWire and WirePlumber from the distribution, no GPU access) with every process started as the ordinary user on a private runtime directory and a private session bus:

@@ -12,7 +12,8 @@ use std::path::Path;
 use serde::Deserialize;
 
 use super::types::{
-    SwayIpc, SwayOutput, IPC_GET_OUTPUTS, IPC_MAGIC, IPC_MAX_PAYLOAD, IPC_RUN_COMMAND, IPC_TIMEOUT,
+    SwayIpc, SwayOutput, IPC_GET_OUTPUTS, IPC_MAGIC, IPC_MAX_PAYLOAD, IPC_RUN_COMMAND,
+    IPC_SUBSCRIBE, IPC_TIMEOUT,
 };
 use crate::ports::display::{OutputFacts, OutputId, Rect, VdisplayError};
 
@@ -112,6 +113,19 @@ impl SwayIpc {
                 failed.error.as_deref().unwrap_or("no reason given")
             ))),
             None => Ok(()),
+        }
+    }
+
+    /// Asks sway to send the named events (for example `output`) on this connection. After
+    /// this the connection carries events, not replies.
+    pub fn subscribe(&mut self, events: &[&str]) -> Result<(), VdisplayError> {
+        let payload = serde_json::to_vec(events).map_err(request_err)?;
+        let reply = self.call(IPC_SUBSCRIBE, &payload)?;
+        let result: RawResult = serde_json::from_slice(&reply).map_err(request_err)?;
+        if result.success {
+            Ok(())
+        } else {
+            Err(request_err("sway refused the subscription"))
         }
     }
 

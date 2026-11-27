@@ -221,6 +221,31 @@ pub struct PipelineState {
     pub(super) written: AtomicU64,
     /// What is known about the dock's panel, and where it is cached.
     pub(super) display: Mutex<DisplayState>,
+    /// What the video loop saw of the size of a captured stream.
+    pub(super) stream: Mutex<StreamWatch>,
+    /// Where a changed stream size is reported; `None` follows nothing.
+    pub(super) events: Mutex<Option<std::sync::mpsc::Sender<Command>>>,
+}
+
+/// Frames in a row at another size before a stream counts as renegotiated.
+pub(super) const STREAM_MISMATCH_FRAMES: u32 = 5;
+
+/// How long after a change of the capture area the frames still at the old size are
+/// ignored, because the stream has not renegotiated yet.
+pub(super) const STREAM_SETTLE: Duration = Duration::from_secs(1);
+
+/// The video loop's count of frames whose size differs from the one asked of the stream.
+#[derive(Debug)]
+pub(super) struct StreamWatch {
+    /// The capture area the counts belong to.
+    pub(super) area: CaptureArea,
+    /// When that area became the one in use.
+    pub(super) since: std::time::Instant,
+    /// Frames in a row at a size other than the area's.
+    pub(super) mismatched: u32,
+    /// The size already reported, so one renegotiation is reported once.
+    pub(super) reported: Option<(u32, u32)>,
+    pub(super) settle: Duration,
 }
 
 /// The dock's EDID as the pipeline state tracks it.

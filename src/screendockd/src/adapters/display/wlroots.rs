@@ -9,9 +9,11 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use super::sway_ipc::is_valid_output_name;
-use super::types::{SwayIpc, OUTPUT_SETTLE};
+use super::types::{MonitorWatcher, SwayIpc, SwayOutputEvents, WatchTarget, OUTPUT_SETTLE};
 pub use super::types::{WlrootsHeadlessDisplay, WlrootsMonitor};
-use crate::ports::display::{MonitorSpec, Rect, VdisplayError, VirtualDisplay, VirtualMonitor};
+use crate::ports::display::{
+    DisplayEventSink, MonitorSpec, Rect, VdisplayError, VirtualDisplay, VirtualMonitor,
+};
 
 impl WlrootsHeadlessDisplay {
     /// A display that talks to the sway whose IPC socket is at `socket`.
@@ -108,6 +110,8 @@ impl VirtualDisplay for WlrootsHeadlessDisplay {
             ipc,
             name,
             rect: spec.rect,
+            expected: std::sync::Arc::new(std::sync::Mutex::new(Some(spec.rect))),
+            watcher: None,
         }))
     }
 }
@@ -125,14 +129,49 @@ impl VirtualMonitor for WlrootsMonitor {
     }
 
     fn resize(&mut self, spec: &MonitorSpec) -> Result<(), VdisplayError> {
-        apply(&mut self.ipc, &self.name, spec.rect)?;
+        // The watcher must expect the new rectangle before sway reports it.
+        self.expect(spec.rect);
+        if let Err(error) = apply(&mut self.ipc, &self.name, spec.rect) {
+            self.expect(self.rect);
+            return Err(error);
+        }
         self.rect = spec.rect;
         Ok(())
+    }
+
+    fn follow(&mut self, notify: DisplayEventSink) {
+        self.watcher = None;
+        let started = SwayOutputEvents::connect(&self.socket).and_then(|source| {
+            MonitorWatcher::spawn(
+                source,
+                WatchTarget::Monitor(self.name.clone()),
+                self.expected.clone(),
+                notify,
+            )
+            .map_err(|e| VdisplayError::Request(e.to_string()))
+        });
+        match started {
+            Ok(watcher) => self.watcher = Some(watcher),
+            Err(error) => tracing::warn!(%error, "not following changes to the sway output"),
+        }
+    }
+
+    fn observe(&mut self, rect: Rect) {
+        self.rect = rect;
+        self.expect(rect);
+    }
+}
+
+impl WlrootsMonitor {
+    fn expect(&self, rect: Rect) {
+        *self.expected.lock().unwrap_or_else(|e| e.into_inner()) = Some(rect);
     }
 }
 
 impl Drop for WlrootsMonitor {
     fn drop(&mut self) {
+        // Stop watching first: unplugging the output must not look like an outside change.
+        self.watcher = None;
         match SwayIpc::connect(&self.socket) {
             Ok(mut ipc) => unplug(&mut ipc, &self.name),
             Err(e) => {

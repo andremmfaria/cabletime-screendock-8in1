@@ -4,6 +4,7 @@
 //! [`SystemDisplayProvider`] gathers facts and builds the display a policy decision names.
 
 mod facts;
+mod follow;
 mod mirror;
 mod mutter;
 mod portal;
@@ -37,7 +38,9 @@ pub use self::types::{
     RandrBackend, RecoveryOutcome, RecoveryState, RecoveryStore, ScreenSize, SystemDisplayProvider,
     X11MonitorGuard, X11RandrDisplay, XRandr,
 };
-pub use self::types::{SwayIpc, SwayOutput, WlrootsHeadlessDisplay, WlrootsMonitor};
+pub use self::types::{
+    SwayIpc, SwayOutput, SwayOutputEvents, WlrootsHeadlessDisplay, WlrootsMonitor,
+};
 use crate::ports::display::{
     DisplayFacts, DisplayProvider, DisplayServer, ExtendBackend, VdisplayError, VirtualDisplay,
 };

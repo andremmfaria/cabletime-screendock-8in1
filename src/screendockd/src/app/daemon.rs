@@ -176,6 +176,7 @@ fn video_loop(
                 continue;
             }
         };
+        params.pipeline.note_frame_size(frame.width, frame.height);
         if clock.next_frame() {
             encoder.request_keyframe();
         }

@@ -123,6 +123,14 @@ The monitor is watched through its bare RandR monitor (by name) or through the C
 
 With `follow_system_changes = false` the difference is logged and the daemon keeps its own size and position. The key is live. In mirror mode there is no monitor to follow. Whether a desktop's display settings list a bare monitor is up to the desktop; `xrandr` always works.
 
+### sway
+
+On sway the watcher subscribes to `output` events on the sway IPC socket and reads the output list when the layout has been quiet. `swaymsg output <name> mode <W>x<H>` on the daemon's headless output gives one dock cycle with a rebuilt encoder and a keyframe, `output <name> pos <x> <y>` retargets capture without a cycle, and `output <name> unplug` reverts to mirror. The daemon announces its own mode and position changes first, so `ctl set resolution` causes one cycle. sway lays outputs out itself, so a mode change can also move the output; the daemon then follows the move too and `placement` becomes `at`.
+
+### Wayland streams (Mutter and portal)
+
+For a monitor captured through a PipeWire stream the daemon compares the size of the arriving frames with the size it asked for. Frames that keep another size for 5 frames, more than 1 second after the daemon last changed the capture area, count as a renegotiation and are applied like a resize from outside. Frames still at the old size right after the daemon's own change are ignored. Limits: headless GNOME Shell has one virtual monitor with one mode and no runtime resize, and a Mutter stream delivers frames only when the shell repaints, so a size change is seen only once frames arrive. This path is covered by unit tests of the frame size tracking; a live stream renegotiation is requires validation on a real GNOME session.
+
 ## Commands
 
 | Command | Output |
